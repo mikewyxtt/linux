@@ -6,6 +6,7 @@
  * Sorted alphabetically.
  */
 
+#include <linux/device.h>
 #include <linux/ioctl.h>
 #include <linux/ktime.h>
 #include <linux/refcount.h>
