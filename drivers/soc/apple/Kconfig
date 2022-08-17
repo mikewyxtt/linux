@@ -19,8 +19,8 @@ config APPLE_PMGR_PWRSTATE
 
 config APPLE_RTKIT
 	tristate "Apple RTKit co-processor IPC protocol"
-	depends on MAILBOX
 	depends on ARCH_APPLE || COMPILE_TEST
+	select MAILBOX # depend creates cycle with RUST_APPLE_RTKIT
 	default ARCH_APPLE
 	help
 	  Apple SoCs such as the M1 come with various co-processors running
@@ -29,6 +29,14 @@ config APPLE_RTKIT
 	  by various client drivers.
 
 	  Say 'y' here if you have an Apple SoC.
+
+# Rust abstractions cannot be built as modules currently, so force them as
+# bool by using these intermediate options. In the future these could be
+# tristate once abstractions themselves can be built as modules.
+config RUST_APPLE_RTKIT
+	bool "Rust support"
+	depends on APPLE_RTKIT=y
+	default ARCH_APPLE if APPLE_RTKIT=y
 
 config APPLE_SART
 	tristate "Apple SART DMA address filter"
