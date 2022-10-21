@@ -17,6 +17,7 @@
 #include "kunit.c"
 #include "lockdep.c"
 #include "mutex.c"
+#include "of.c"
 #include "page.c"
 #include "platform_device.c"
 #include "refcount.c"
