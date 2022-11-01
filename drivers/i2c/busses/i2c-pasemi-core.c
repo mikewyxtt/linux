@@ -83,42 +83,74 @@ static void pasemi_reset(struct pasemi_smbus *smbus)
 	reinit_completion(&smbus->irq_completion);
 }
 
-static void pasemi_smb_clear(struct pasemi_smbus *smbus)
+static int pasemi_smb_clear(struct pasemi_smbus *smbus)
 {
 	unsigned int status;
+	int ret;
 
-	status = reg_read(smbus, REG_SMSTA);
+	/* First wait for the bus to go idle */
+	ret = read_poll_timeout(reg_read, status, !(status & (SMSTA_XIP | SMSTA_JAM)),
+				  USEC_PER_MSEC, USEC_PER_MSEC*TRANSFER_TIMEOUT_MS, true,
+				  smbus, REG_SMSTA);
+
+	if (ret < 0) {
+		dev_warn(smbus->dev, "Bus is still stuck (status 0x%08x)\n", status);
+		return -EIO;
+	}
+
+	/* If any badness happened or there is data in the FIFOs, reset the FIFOs */
+	if ((status & (SMSTA_MRNE | SMSTA_JMD | SMSTA_MTO | SMSTA_TOM | SMSTA_MTN | SMSTA_MTA)) ||
+		!(status & SMSTA_MTE))
+		pasemi_reset(smbus);
+
+	/* Clear the flags */
 	reg_write(smbus, REG_SMSTA, status);
+
+	return 0;
 }
 
 static int pasemi_smb_waitready(struct pasemi_smbus *smbus)
 {
-	int ret;
 	unsigned int status;
 
 	if (smbus->use_irq) {
 		reinit_completion(&smbus->irq_completion);
-		reg_write(smbus, REG_IMASK, SMSTA_XEN | SMSTA_MTN);
-		ret = wait_for_completion_timeout(&smbus->irq_completion, msecs_to_jiffies(TRANSFER_TIMEOUT_MS));
-		if (ret == 0)
-			ret = -ETIMEDOUT;
+		/* XEN should be set when a transaction terminates, whether due to error or not */
+		reg_write(smbus, REG_IMASK, SMSTA_XEN);
+		wait_for_completion_timeout(&smbus->irq_completion, msecs_to_jiffies(TRANSFER_TIMEOUT_MS));
 		reg_write(smbus, REG_IMASK, 0);
 		status = reg_read(smbus, REG_SMSTA);
 	} else {
-		ret = read_poll_timeout(reg_read, status, (status & (SMSTA_XEN)),
-				        USEC_PER_MSEC, USEC_PER_MSEC*TRANSFER_TIMEOUT_MS, true,
-				        smbus, REG_SMSTA);
+		read_poll_timeout(reg_read, status, (status & (SMSTA_XEN)),
+				  USEC_PER_MSEC, USEC_PER_MSEC*TRANSFER_TIMEOUT_MS, true,
+				  smbus, REG_SMSTA);
 	}
+
+	/* Controller timeout? */
+	if (status & SMSTA_TOM) {
+		dev_warn(smbus->dev, "Controller timeout, status 0x%08x\n", status);
+		return -EIO;
+	}
+
+	/* Peripheral timeout? */
+	if (status & SMSTA_MTO) {
+		dev_warn(smbus->dev, "Peripheral timeout, status 0x%08x\n", status);
+		return -ETIME;
+	}
+
+	/* Still stuck in a transaction? */
+	if (status & SMSTA_XIP) {
+		dev_warn(smbus->dev, "Bus stuck, status 0x%08x\n", status);
+		return -EIO;
+	}
+
+	/* Arbitration loss? */
+	if (status & SMSTA_MTA)
+		return -EBUSY;
 
 	/* Got NACK? */
 	if (status & SMSTA_MTN)
 		return -ENXIO;
-
-	if (ret < 0) {
-		dev_warn(smbus->dev, "Timeout, status 0x%08x\n", status);
-		reg_write(smbus, REG_SMSTA, status);
-		return -ETIME;
-	}
 
 	/* Clear XEN */
 	reg_write(smbus, REG_SMSTA, SMSTA_XEN);
@@ -180,7 +212,8 @@ static int pasemi_i2c_xfer(struct i2c_adapter *adapter,
 	struct pasemi_smbus *smbus = adapter->algo_data;
 	int ret, i;
 
-	pasemi_smb_clear(smbus);
+	if (pasemi_smb_clear(smbus))
+		return -EIO;
 
 	ret = 0;
 
@@ -203,7 +236,8 @@ static int pasemi_smb_xfer(struct i2c_adapter *adapter,
 	addr <<= 1;
 	read_flag = read_write == I2C_SMBUS_READ;
 
-	pasemi_smb_clear(smbus);
+	if (pasemi_smb_clear(smbus))
+		return -EIO;
 
 	switch (size) {
 	case I2C_SMBUS_QUICK:
