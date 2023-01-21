@@ -727,6 +727,7 @@ free_rtk:
 	kfree(rtk);
 	return ERR_PTR(ret);
 }
+EXPORT_SYMBOL_GPL(apple_rtkit_init);
 
 static int apple_rtkit_wait_for_completion(struct completion *c)
 {
@@ -911,10 +912,8 @@ int apple_rtkit_wake(struct apple_rtkit *rtk)
 }
 EXPORT_SYMBOL_GPL(apple_rtkit_wake);
 
-static void apple_rtkit_free(void *data)
+void apple_rtkit_free(struct apple_rtkit *rtk)
 {
-	struct apple_rtkit *rtk = data;
-
 	apple_mbox_stop(rtk->mbox);
 	destroy_workqueue(rtk->wq);
 
@@ -924,6 +923,12 @@ static void apple_rtkit_free(void *data)
 
 	kfree(rtk->syslog_msg_buffer);
 	kfree(rtk);
+}
+EXPORT_SYMBOL_GPL(apple_rtkit_free);
+
+static void apple_rtkit_free_wrapper(void *data)
+{
+	apple_rtkit_free(data);
 }
 
 struct apple_rtkit *devm_apple_rtkit_init(struct device *dev, void *cookie,
@@ -937,7 +942,7 @@ struct apple_rtkit *devm_apple_rtkit_init(struct device *dev, void *cookie,
 	if (IS_ERR(rtk))
 		return rtk;
 
-	ret = devm_add_action_or_reset(dev, apple_rtkit_free, rtk);
+	ret = devm_add_action_or_reset(dev, apple_rtkit_free_wrapper, rtk);
 	if (ret)
 		return ERR_PTR(ret);
 
