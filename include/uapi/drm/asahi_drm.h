@@ -281,7 +281,7 @@ struct drm_asahi_cmd_compute {
 
 	__u64 buffer_descriptor;
 
-	__u32 buffer_descriptor_size; // ?
+	__u32 buffer_descriptor_size; /* ? */
 	__u32 ctx_switch_prog;
 
 	__u32 encoder_id;
