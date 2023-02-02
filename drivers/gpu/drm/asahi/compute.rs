@@ -396,7 +396,7 @@ impl file::Queue for ComputeQueue::ver {
                             evctl_index: 0, // fixed
                             unk_24: unk0.into(),
                             uuid: uuid,
-                            prev_stamp_value: 0,
+                            queue_cmd_count: 0, // TODO: fix
                         },
                         cur_ts: U64(0),
                         start_ts: Some(inner_ptr!(inner.timestamps.gpu_pointer(), start)),

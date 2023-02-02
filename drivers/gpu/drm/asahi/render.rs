@@ -523,7 +523,7 @@ impl file::Queue for RenderQueue::ver {
                     event_generation: self.id as u32,
                     buffer_slot: scene.slot(),
                     unk_5c: 0,
-                    prev_stamp_value: U64(batches_frag.event_value().counter() as u64),
+                    queue_cmd_count: U64(batches_frag.event_value().counter() as u64), // TODO: fix
                     unk_68: 0,
                     unk_758_flag: inner_weak_ptr!(ptr, unk_758_flag),
                     unk_job_buf: inner_weak_ptr!(ptr, unk_buf_0),
@@ -822,7 +822,7 @@ impl file::Queue for RenderQueue::ver {
                             evctl_index: 0, // fixed
                             unk_24: unk0.into(),
                             uuid: uuid_3d,
-                            prev_stamp_value: batches_frag.event_value().counter(),
+                            queue_cmd_count: batches_frag.event_value().counter(), // TODO: fix
                         },
                         unk_after_meta: unk1.into(),
                         unk_buf_0: U64(0),
@@ -896,7 +896,7 @@ impl file::Queue for RenderQueue::ver {
                     event_generation: self.id as u32,
                     buffer_slot: scene.slot(),
                     unk_44: 0,
-                    prev_stamp_value: U64(batches_vtx.event_value().counter() as u64),
+                    queue_cmd_count: U64(batches_vtx.event_value().counter() as u64), // TODO: fix
                     unk_50: 0,
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     unk_job_buf: inner_weak_ptr!(ptr, unk_buf_0),
@@ -1125,7 +1125,7 @@ impl file::Queue for RenderQueue::ver {
                             evctl_index: 0, // fixed
                             unk_24: unk0.into(),
                             uuid: uuid_ta,
-                            prev_stamp_value: batches_vtx.event_value().counter(),
+                            queue_cmd_count: batches_vtx.event_value().counter(), // TODO: fix
                         },
                         unk_after_meta: unk1.into(),
                         unk_buf_0: U64(0),

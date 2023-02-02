@@ -19,7 +19,7 @@ pub(crate) mod raw {
         pub(crate) evctl_index: u32,
         pub(crate) unk_24: u32,
         pub(crate) uuid: u32,
-        pub(crate) prev_stamp_value: u32,
+        pub(crate) queue_cmd_count: u32,
     }
 
     #[derive(Debug)]
