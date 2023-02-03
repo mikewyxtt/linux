@@ -156,6 +156,7 @@ pub trait BaseObject: IntoGEMObject {
         })?;
         Ok(handle)
     }
+
     /// Looks up an object by its handle for a given `File`.
     fn lookup_handle(
         file: &file::File<<<Self as IntoGEMObject>::Driver as drv::Driver>::File>,
