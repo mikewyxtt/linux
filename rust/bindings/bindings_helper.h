@@ -13,6 +13,7 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_mm.h>
 #include <drm/drm_syncobj.h>
+#include <drm/gpu_scheduler.h>
 #include <linux/amba/bus.h>
 #include <linux/device.h>
 #include <linux/cdev.h>
