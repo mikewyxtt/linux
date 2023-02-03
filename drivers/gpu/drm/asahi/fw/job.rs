@@ -17,7 +17,7 @@ pub(crate) mod raw {
         pub(crate) stamp_value: EventValue,
         pub(crate) stamp_slot: u32,
         pub(crate) evctl_index: u32,
-        pub(crate) unk_24: u32,
+        pub(crate) flush_stamps: u32,
         pub(crate) uuid: u32,
         pub(crate) queue_cmd_count: u32,
     }

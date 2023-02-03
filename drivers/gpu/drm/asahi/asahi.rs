@@ -6,7 +6,6 @@
 mod alloc;
 mod buffer;
 mod channel;
-mod compute;
 mod debug;
 mod driver;
 mod event;
@@ -22,8 +21,8 @@ mod microseq;
 mod mmu;
 mod object;
 mod place;
+mod queue;
 mod regs;
-mod render;
 mod slotalloc;
 mod util;
 mod workqueue;

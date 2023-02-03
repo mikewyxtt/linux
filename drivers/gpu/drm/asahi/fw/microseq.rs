@@ -30,6 +30,24 @@ pub(crate) enum Pipe {
     Compute = 1 << 15,
 }
 
+pub(crate) const MAX_ATTACHMENTS: usize = 16;
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub(crate) struct Attachment {
+    pub(crate) address: U64,
+    pub(crate) size: u32,
+    pub(crate) unk_c: u16,
+    pub(crate) unk_e: u16,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub(crate) struct Attachments {
+    pub(crate) list: Array<MAX_ATTACHMENTS, Attachment>,
+    pub(crate) count: u32,
+}
+
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct OpHeader(u32);
 
@@ -205,15 +223,6 @@ pub(crate) struct FinalizeVertex {
 #[versions(AGX)]
 impl Operation for FinalizeVertex::ver {}
 
-#[derive(Debug, Clone, Copy, Default)]
-#[repr(C)]
-pub(crate) struct Attachment {
-    pub(crate) address: U64,
-    pub(crate) size: u32,
-    pub(crate) unk_c: u16,
-    pub(crate) unk_e: u16,
-}
-
 #[versions(AGX)]
 #[derive(Debug)]
 #[repr(C)]
@@ -241,8 +250,7 @@ pub(crate) struct StartFragment<'a> {
     pub(crate) unk_80: u32,
     pub(crate) unk_84: u32,
     pub(crate) uuid: u32,
-    pub(crate) attachments: Array<0x10, Attachment>,
-    pub(crate) num_attachments: u32,
+    pub(crate) attachments: Attachments,
     pub(crate) unk_190: u32,
 
     #[ver(V >= V13_0B4)]
@@ -313,7 +321,8 @@ pub(crate) struct StartCompute<'a> {
     pub(crate) job_params2: GpuWeakPointer<compute::raw::JobParameters2::ver<'a>>,
     pub(crate) unk_44: u32,
     pub(crate) uuid: u32,
-    pub(crate) padding: Array<0x108, u8>,
+    pub(crate) attachments: Attachments,
+    pub(crate) padding: u32,
 
     #[ver(V >= V13_0B4)]
     pub(crate) unk_flag: GpuWeakPointer<U32>,

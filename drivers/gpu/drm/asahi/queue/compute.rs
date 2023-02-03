@@ -7,6 +7,7 @@
 //! This module is in charge of creating all of the firmware structures required to submit compute
 //! work to the GPU, based on the userspace command buffer.
 
+use super::common;
 use crate::alloc::Allocator;
 use crate::debug::*;
 use crate::driver::AsahiDevice;
@@ -121,7 +122,7 @@ impl ComputeQueue::ver {
 #[versions(AGX)]
 impl file::Queue for ComputeQueue::ver {
     /// Submit work to a compute queue.
-    fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result {
+    fn submit(&self, cmd: &bindings::drm_asahi_command, id: u64) -> Result {
         if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE {
             return Err(EINVAL);
         }
@@ -205,7 +206,6 @@ impl file::Queue for ComputeQueue::ver {
 
         let uuid = cmdbuf.cmd_id;
 
-        let unk0 = debug_enabled(debug::DebugFlags::Debug0);
         let unk3 = debug_enabled(debug::DebugFlags::Debug3);
 
         mod_dev_dbg!(self.dev, "[Submission {}] UUID = {:#x?}\n", id, uuid);
@@ -244,6 +244,10 @@ impl file::Queue for ComputeQueue::ver {
                     job_params2: inner_weak_ptr!(ptr, job_params2),
                     unk_44: 0x0,
                     uuid,
+                    attachments: common::build_attachments(
+                        cmdbuf.attachments,
+                        cmdbuf.attachment_count,
+                    )?,
                     padding: Default::default(),
                     #[ver(V >= V13_0B4)]
                     unk_flag: inner_weak_ptr!(ptr, unk_flag),
@@ -394,7 +398,7 @@ impl file::Queue for ComputeQueue::ver {
                             stamp_value: next_stamp,
                             stamp_slot: batches.event().slot(),
                             evctl_index: 0, // fixed
-                            unk_24: unk0.into(),
+                            flush_stamps: 0,
                             uuid: uuid,
                             queue_cmd_count: 0, // TODO: fix
                         },

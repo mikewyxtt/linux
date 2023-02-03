@@ -16,9 +16,9 @@
 extern "C" {
 #endif
 
-#define DRM_ASAHI_UNSTABLE_UABI_VERSION	4
+#define DRM_ASAHI_UNSTABLE_UABI_VERSION		10005
 
-#define DRM_ASAHI_GET_PARAM			0x00
+#define DRM_ASAHI_GET_PARAMS			0x00
 #define DRM_ASAHI_VM_CREATE			0x01
 #define DRM_ASAHI_VM_DESTROY			0x02
 #define DRM_ASAHI_GEM_CREATE			0x03
@@ -28,26 +28,28 @@ extern "C" {
 #define DRM_ASAHI_QUEUE_DESTROY			0x07
 #define DRM_ASAHI_SUBMIT			0x08
 
-enum drm_asahi_param {
-	/* UAPI related */
-	DRM_ASAHI_PARAM_UNSTABLE_UABI_VERSION,
+struct drm_asahi_params_global {
+	__u32 unstable_uabi_version;
+	__u32 pad0;
 
-	/* GPU identification */
-	DRM_ASAHI_PARAM_GPU_GENERATION,
-	DRM_ASAHI_PARAM_GPU_VARIANT,
-	DRM_ASAHI_PARAM_GPU_REVISION,
-	DRM_ASAHI_PARAM_CHIP_ID,
+	__u64 feat_compat;
+	__u64 feat_incompat;
 
-	/* GPU features */
-	DRM_ASAHI_PARAM_FEAT_COMPAT,
-	DRM_ASAHI_PARAM_FEAT_INCOMPAT,
+	__u32 gpu_generation;
+	__u32 gpu_variant;
+	__u32 gpu_revision;
+	__u32 chip_id;
 
-	/* VM info */
-	DRM_ASAHI_PARAM_VM_PAGE_SIZE,
-	DRM_ASAHI_PARAM_VM_USER_START,
-	DRM_ASAHI_PARAM_VM_USER_END,
-	DRM_ASAHI_PARAM_VM_SHADER_START,
-	DRM_ASAHI_PARAM_VM_SHADER_END,
+	__u32 vm_page_size;
+	__u32 pad1;
+	__u64 vm_user_start;
+	__u64 vm_user_end;
+	__u64 vm_shader_start;
+	__u64 vm_shader_end;
+
+	__u32 max_commands_per_submission;
+	__u32 max_pending_commands;
+	__u32 max_attachments;
 };
 
 /*
@@ -59,18 +61,27 @@ enum drm_asahi_feat_incompat {
 	DRM_ASAHI_FEAT_MANDATORY_ZS_COMPRESSION = (1UL) << 0,
 };
 
-struct drm_asahi_get_param {
-	/** @param: Parameter ID to fetch */
-	__u32 param;
+struct drm_asahi_get_params {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
+	/** @param: Parameter group to fetch (MBZ) */
+	__u32 param_group;
 
 	/** @pad: MBZ */
 	__u32 pad;
 
-	/** @value: Returned parameter value */
-	__u64 value;
+	/** @value: User pointer to write parameter struct */
+	__u64 pointer;
+
+	/** @value: Size of user buffer, max size supported on return */
+	__u64 size;
 };
 
 struct drm_asahi_vm_create {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
 	/** @value: Returned VM ID */
 	__u32 vm_id;
 
@@ -79,6 +90,9 @@ struct drm_asahi_vm_create {
 };
 
 struct drm_asahi_vm_destroy {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
 	/** @value: VM ID to be destroyed */
 	__u32 vm_id;
 
@@ -89,6 +103,9 @@ struct drm_asahi_vm_destroy {
 #define ASAHI_GEM_WRITEBACK	(1L << 0)
 
 struct drm_asahi_gem_create {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
 	/** @size: Size of the BO */
 	__u64 size;
 
@@ -100,6 +117,9 @@ struct drm_asahi_gem_create {
 };
 
 struct drm_asahi_gem_mmap_offset {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
 	/** @handle: Handle for the object being mapped. */
 	__u32 handle;
 
@@ -110,10 +130,25 @@ struct drm_asahi_gem_mmap_offset {
 	__u64 offset;
 };
 
+enum drm_asahi_bind_op {
+	ASAHI_BIND_OP_BIND = 0,
+	ASAHI_BIND_OP_UNBIND = 1,
+	ASAHI_BIND_OP_UNBIND_ALL = 2,
+};
+
 #define ASAHI_BIND_READ		(1L << 0)
 #define ASAHI_BIND_WRITE	(1L << 1)
 
 struct drm_asahi_gem_bind {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
+	/** @obj: Bind operation */
+	__u32 op;
+
+	/** @flags: One or more of ASAHI_BIND_* */
+	__u32 flags;
+
 	/** @obj: GEM object to bind */
 	__u32 handle;
 
@@ -128,36 +163,6 @@ struct drm_asahi_gem_bind {
 
 	/** @addr: Address to bind to */
 	__u64 addr;
-
-	/** @flags: One or more of ASAHI_BO_* */
-	__u32 flags;
-};
-
-enum drm_asahi_queue_type {
-	DRM_ASAHI_QUEUE_RENDER = 0,
-	DRM_ASAHI_QUEUE_COMPUTE = 1,
-};
-
-struct drm_asahi_queue_create {
-	/** @vm_id: The ID of the VM this queue is bound to */
-	__u32 vm_id;
-
-	/** @type: One of enum drm_asahi_queue_type */
-	__u32 queue_type;
-
-	/** @priority: Queue priority, 0-3 */
-	__u32 priority;
-
-	/** @flags: MBZ */
-	__u32 flags;
-
-	/** @queue_id: The returned queue ID */
-	__u32 queue_id;
-};
-
-struct drm_asahi_queue_destroy {
-	/** @queue_id: The queue ID to be destroyed */
-	__u32 queue_id;
 };
 
 enum drm_asahi_cmd_type {
@@ -166,50 +171,146 @@ enum drm_asahi_cmd_type {
 	DRM_ASAHI_CMD_COMPUTE = 2,
 };
 
-struct drm_asahi_submit {
-	/** @queue_id: The queue ID to be submitted to */
-	__u32 queue_id;
+/* Note: this is an enum so that it can be resolved by Rust bindgen. */
+enum drm_asahi_queue_cap {
+	DRM_ASAHI_QUEUE_CAP_RENDER	= (1UL << DRM_ASAHI_CMD_RENDER),
+	DRM_ASAHI_QUEUE_CAP_BLIT	= (1UL << DRM_ASAHI_CMD_BLIT),
+	DRM_ASAHI_QUEUE_CAP_COMPUTE	= (1UL << DRM_ASAHI_CMD_COMPUTE),
+};
 
-	/** @type: One of drm_asahi_cmd_type */
-	__u32 cmd_type;
-
-	/** @cmdbuf: Pointer to the appropriate command buffer structure */
-	__u64 cmd_buffer;
+struct drm_asahi_queue_create {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
 
 	/** @flags: MBZ */
 	__u32 flags;
 
+	/** @vm_id: The ID of the VM this queue is bound to */
+	__u32 vm_id;
+
+	/** @type: Bitmask of DRM_ASAHI_QUEUE_CAP_* */
+	__u32 queue_caps;
+
+	/** @priority: Queue priority, 0-3 */
+	__u32 priority;
+
+	/** @queue_id: The returned queue ID */
+	__u32 queue_id;
+};
+
+struct drm_asahi_queue_destroy {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
+	/** @queue_id: The queue ID to be destroyed */
+	__u32 queue_id;
+};
+
+enum drm_asahi_sync_type {
+	DRM_ASAHI_SYNC_SYNCOBJ = 0,
+	DRM_ASAHI_SYNC_TIMELINE_SYNCOBJ = 1,
+};
+
+struct drm_asahi_sync {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
+	/** @sync_type: One of drm_asahi_sync_type */
+	__u32 sync_type;
+
+	/** @handle: The sync object handle */
+	__u32 handle;
+
+	/** @timeline_value: Timeline value for timeline sync objects */
+	__u64 timeline_value;
+};
+
+enum drm_asahi_subqueue {
+	DRM_ASAHI_SUBQUEUE_RENDER = 0, /* Also blit */
+	DRM_ASAHI_SUBQUEUE_COMPUTE = 1,
+	DRM_ASAHI_SUBQUEUE_COUNT = 2,
+};
+
+struct drm_asahi_command {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
+	/** @type: One of drm_asahi_cmd_type */
+	__u32 cmd_type;
+
+	/** @flags: Flags for command submission */
+	__u32 flags;
+
+	/** @cmdbuf: Pointer to the appropriate command buffer structure */
+	__u64 cmd_buffer;
+
+	/** @cmdbuf: Size of the command buffer structure */
+	__u64 cmd_buffer_size;
+
+	/** @cmdbuf: Offset into the result BO to return information about this command */
+	__u64 result_offset;
+
+	/** @cmdbuf: Size of the result data structure */
+	__u64 result_size;
+
+	/** @barriers: Array of command indices per subqueue to wait on */
+	__u32 barriers[DRM_ASAHI_SUBQUEUE_COUNT];
+};
+
+struct drm_asahi_submit {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
+	/** @flags: Flags for command submission (MBZ) */
+	__u32 flags;
+
+	/** @queue_id: The queue ID to be submitted to */
+	__u32 queue_id;
+
+	/** @result_handle: An optional BO handle to place result data in */
+	__u32 result_handle;
+
 	/** @in_sync_count: Number of sync objects to wait on before starting this job. */
 	__u32 in_sync_count;
 
-	/** @in_syncs: An optional array of sync objects to wait on before starting this job. */
+	/** @in_syncs: An optional array of drm_asahi_sync to wait on before starting this job. */
 	__u64 in_syncs;
 
-	/** @out_sync: An optional sync object to place the completion fence in. */
-	__u32 out_sync;
-};
+	/** @in_sync_count: Number of sync objects to signal upon completion of this job. */
+	__u32 out_sync_count;
 
-#define ASAHI_MAX_ATTACHMENTS 16
+	/** @in_syncs: An optional array of drm_asahi_sync objects to signal upon completion. */
+	__u64 out_syncs;
+
+};
 
 #define ASAHI_ATTACHMENT_C    0
 #define ASAHI_ATTACHMENT_Z    1
 #define ASAHI_ATTACHMENT_S    2
 
+// FIXME: Type doesn't make sense here
 struct drm_asahi_attachment {
 	__u32 type;
 	__u32 size;
 	__u64 pointer;
 };
 
-#define ASAHI_CMDBUF_NO_CLEAR_PIPELINE_TEXTURES (1UL << 0)
-#define ASAHI_CMDBUF_SET_WHEN_RELOADING_Z_OR_S (1UL << 1)
-#define ASAHI_CMDBUF_MEMORYLESS_RTS_USED (1UL << 2)
-#define ASAHI_CMDBUF_PROCESS_EMPTY_TILES (1UL << 3)
+#define ASAHI_RENDER_NO_CLEAR_PIPELINE_TEXTURES (1UL << 0)
+#define ASAHI_RENDER_SET_WHEN_RELOADING_Z_OR_S (1UL << 1)
+#define ASAHI_RENDER_MEMORYLESS_RTS_USED (1UL << 2)
+#define ASAHI_RENDER_PROCESS_EMPTY_TILES (1UL << 3)
 
 struct drm_asahi_cmd_render {
+	/** @extensions: Pointer to the first extension struct, if any */
+	__u64 extensions;
+
 	__u64 flags;
 
 	__u64 encoder_ptr;
+
+	__u64 attachments;
+	__u32 attachment_count;
+	__u32 pad;
 
 	__u64 depth_buffer_1;
 	__u64 depth_buffer_2;
@@ -269,8 +370,6 @@ struct drm_asahi_cmd_render {
 	__u32 isp_bgobjdepth;
 	__u32 isp_bgobjvals;
 
-	struct drm_asahi_attachment attachments[ASAHI_MAX_ATTACHMENTS];
-	__u32 attachment_count;
 };
 
 struct drm_asahi_cmd_compute {
@@ -278,6 +377,10 @@ struct drm_asahi_cmd_compute {
 
 	__u64 encoder_ptr;
 	__u64 encoder_end;
+
+	__u64 attachments;
+	__u32 attachment_count;
+	__u32 pad;
 
 	__u64 buffer_descriptor;
 
@@ -293,7 +396,7 @@ struct drm_asahi_cmd_compute {
 
 /* Note: this is an enum so that it can be resolved by Rust bindgen. */
 enum {
-   DRM_IOCTL_ASAHI_GET_PARAM        = DRM_IOWR(DRM_COMMAND_BASE + DRM_ASAHI_GET_PARAM, struct drm_asahi_get_param),
+   DRM_IOCTL_ASAHI_GET_PARAMS       = DRM_IOWR(DRM_COMMAND_BASE + DRM_ASAHI_GET_PARAMS, struct drm_asahi_get_params),
    DRM_IOCTL_ASAHI_VM_CREATE        = DRM_IOWR(DRM_COMMAND_BASE + DRM_ASAHI_VM_CREATE, struct drm_asahi_vm_create),
    DRM_IOCTL_ASAHI_VM_DESTROY       = DRM_IOW(DRM_COMMAND_BASE + DRM_ASAHI_VM_DESTROY, struct drm_asahi_vm_destroy),
    DRM_IOCTL_ASAHI_GEM_CREATE       = DRM_IOWR(DRM_COMMAND_BASE + DRM_ASAHI_GEM_CREATE, struct drm_asahi_gem_create),

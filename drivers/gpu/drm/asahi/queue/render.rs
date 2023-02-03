@@ -7,6 +7,7 @@
 //! This module is in charge of creating all of the firmware structures required to submit 3D
 //! rendering work to the GPU, based on the userspace command buffer.
 
+use super::common;
 use crate::alloc::Allocator;
 use crate::debug::*;
 use crate::driver::AsahiDevice;
@@ -267,7 +268,7 @@ impl RenderQueue::ver {
 #[versions(AGX)]
 impl file::Queue for RenderQueue::ver {
     /// Submit work to a render queue.
-    fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result {
+    fn submit(&self, cmd: &bindings::drm_asahi_command, id: u64) -> Result {
         if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER {
             return Err(EINVAL);
         }
@@ -325,6 +326,11 @@ impl file::Queue for RenderQueue::ver {
             )?;
         }
         let cmdbuf = unsafe { cmdbuf.assume_init() };
+
+        if cmdbuf.flags & bindings::ASAHI_RENDER_MEMORYLESS_RTS_USED as u64 != 0 {
+            // Not supported yet
+            return Err(EINVAL);
+        }
 
         if cmdbuf.fb_width == 0
             || cmdbuf.fb_height == 0
@@ -446,15 +452,9 @@ impl file::Queue for RenderQueue::ver {
 
         let timestamps = Arc::try_new(kalloc.shared.new_default::<fw::job::JobTimestamps>()?)?;
 
-        // Seems to be a "go faster" bit? Not sure what it does exactly...
-        let unk0 = debug_enabled(debug::DebugFlags::Debug0);
-
         let unk1 = debug_enabled(debug::DebugFlags::Debug1);
         let unk2 = debug_enabled(debug::DebugFlags::Debug2);
         let unk3 = debug_enabled(debug::DebugFlags::Debug3);
-
-        // Sometimes causes unknown event #7 and a hang, maybe synchronous TVB growth?
-        let unk4 = debug_enabled(debug::DebugFlags::Debug4);
 
         let mut tile_config: u64 = 0;
         if !unk1 {
@@ -463,7 +463,7 @@ impl file::Queue for RenderQueue::ver {
         if cmdbuf.layers > 1 {
             tile_config |= 1;
         }
-        if cmdbuf.flags & bindings::ASAHI_CMDBUF_PROCESS_EMPTY_TILES as u64 != 0 {
+        if cmdbuf.flags & bindings::ASAHI_RENDER_PROCESS_EMPTY_TILES as u64 != 0 {
             tile_config |= 0x10000;
         }
 
@@ -491,22 +491,6 @@ impl file::Queue for RenderQueue::ver {
                     stats
                 );
 
-                let mut attachments: Array<0x10, microseq::Attachment> = Default::default();
-                let mut num_attachments = 0;
-
-                for i in 0..cmdbuf.attachment_count.min(cmdbuf.attachments.len() as u32) {
-                    let att = &cmdbuf.attachments[i as usize];
-                    let cache_lines = (att.size + 127) >> 7;
-                    let order = 1;
-                    attachments[i as usize] = microseq::Attachment {
-                        address: U64(att.pointer),
-                        size: cache_lines,
-                        unk_c: 0x17,
-                        unk_e: order,
-                    };
-                    num_attachments += 1;
-                }
-
                 let start_frag = builder.add(microseq::StartFragment::ver {
                     header: microseq::op::StartFragment::HEADER,
                     job_params2: inner_weak_ptr!(ptr, job_params2),
@@ -531,8 +515,10 @@ impl file::Queue for RenderQueue::ver {
                     unk_80: 0,
                     unk_84: 0,
                     uuid: uuid_3d,
-                    attachments,
-                    num_attachments,
+                    attachments: common::build_attachments(
+                        cmdbuf.attachments,
+                        cmdbuf.attachment_count,
+                    )?,
                     unk_190: 0,
                     #[ver(V >= V13_0B4)]
                     counter: U64(count_frag),
@@ -795,7 +781,7 @@ impl file::Queue for RenderQueue::ver {
                         unk_878: 0,
                         encoder_params: fw::job::raw::EncoderParams {
                             unk_8: (cmdbuf.flags
-                                & bindings::ASAHI_CMDBUF_SET_WHEN_RELOADING_Z_OR_S as u64
+                                & bindings::ASAHI_RENDER_SET_WHEN_RELOADING_Z_OR_S as u64
                                 != 0) as u32,
                             unk_c: 0x0,  // fixed
                             unk_10: 0x0, // fixed
@@ -806,10 +792,10 @@ impl file::Queue for RenderQueue::ver {
                             unk_28: U64(0x0), // fixed
                         },
                         process_empty_tiles: (cmdbuf.flags
-                            & bindings::ASAHI_CMDBUF_PROCESS_EMPTY_TILES as u64
+                            & bindings::ASAHI_RENDER_PROCESS_EMPTY_TILES as u64
                             != 0) as u32,
                         no_clear_pipeline_textures: (cmdbuf.flags
-                            & bindings::ASAHI_CMDBUF_NO_CLEAR_PIPELINE_TEXTURES as u64
+                            & bindings::ASAHI_RENDER_NO_CLEAR_PIPELINE_TEXTURES as u64
                             != 0) as u32,
                         unk_param: unk2.into(), // 1 for boot stuff?
                         unk_pointee: 0,
@@ -820,7 +806,7 @@ impl file::Queue for RenderQueue::ver {
                             stamp_value: next_frag,
                             stamp_slot: batches_frag.event().slot(),
                             evctl_index: 0, // fixed
-                            unk_24: unk0.into(),
+                            flush_stamps: 0,
                             uuid: uuid_3d,
                             queue_cmd_count: batches_frag.event_value().counter(), // TODO: fix
                         },
@@ -1111,9 +1097,8 @@ impl file::Queue for RenderQueue::ver {
                         unk_55c: 0,
                         unk_560: 0,
                         memoryless_rts_used: (cmdbuf.flags
-                            & bindings::ASAHI_CMDBUF_MEMORYLESS_RTS_USED as u64
-                            != 0
-                            || unk4) as u32,
+                            & bindings::ASAHI_RENDER_MEMORYLESS_RTS_USED as u64
+                            != 0) as u32,
                         unk_568: 0,
                         unk_56c: 0,
                         meta: fw::job::raw::JobMeta {
@@ -1123,7 +1108,7 @@ impl file::Queue for RenderQueue::ver {
                             stamp_value: next_vtx,
                             stamp_slot: batches_vtx.event().slot(),
                             evctl_index: 0, // fixed
-                            unk_24: unk0.into(),
+                            flush_stamps: 0,
                             uuid: uuid_ta,
                             queue_cmd_count: batches_vtx.event_value().counter(), // TODO: fix
                         },

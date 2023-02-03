@@ -29,10 +29,7 @@ use crate::box_in_place;
 use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::fw::channels::PipeType;
-use crate::{
-    alloc, buffer, channel, compute, event, file, fw, gem, hw, initdata, mem, mmu, regs, render,
-    workqueue,
-};
+use crate::{alloc, buffer, channel, event, fw, gem, hw, initdata, mem, mmu, regs, workqueue};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Gpu;
 
@@ -198,21 +195,16 @@ pub(crate) trait GpuManager: Send + Sync {
     fn new_vm(&self, file_id: u64) -> Result<mmu::Vm>;
     /// Bind a `Vm` to an available slot and return the `VmBind`.
     fn bind_vm(&self, vm: &mmu::Vm) -> Result<mmu::VmBind>;
-    /// Create a new render command queue.
-    fn new_render_queue(
+    /*
+    /// Create a new user command queue.
+    fn new_queue(
         &self,
         vm: mmu::Vm,
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
         priority: u32,
     ) -> Result<Box<dyn file::Queue>>;
-    /// Create a new compute command queue.
-    fn new_compute_queue(
-        &self,
-        vm: mmu::Vm,
-        ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
-        priority: u32,
-    ) -> Result<Box<dyn file::Queue>>;
+    */
     /// Return a reference to the global `SequenceIDs` instance.
     fn ids(&self) -> &SequenceIDs;
     /// Kick the firmware (wake it up if asleep).
@@ -828,7 +820,8 @@ impl GpuManager for GpuManager::ver {
         self.uat.bind(vm)
     }
 
-    fn new_render_queue(
+    /*
+    fn new_queue(
         &self,
         vm: mmu::Vm,
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
@@ -849,25 +842,7 @@ impl GpuManager for GpuManager::ver {
             priority,
         )?)?)
     }
-
-    fn new_compute_queue(
-        &self,
-        vm: mmu::Vm,
-        ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
-        priority: u32,
-    ) -> Result<Box<dyn file::Queue>> {
-        let mut kalloc = self.alloc();
-        let id = self.ids.queue.next();
-        Ok(Box::try_new(compute::ComputeQueue::ver::new(
-            &self.dev,
-            vm,
-            &mut kalloc,
-            ualloc,
-            self.event_manager.clone(),
-            id,
-            priority,
-        )?)?)
-    }
+    */
 
     fn kick_firmware(&self) -> Result {
         let mut guard = self.rtkit.lock();

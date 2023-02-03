@@ -11,8 +11,10 @@ use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::{alloc, buffer, driver, gem, mmu};
 use kernel::drm::gem::BaseObject;
+use kernel::io_buffer::IoBufferWriter;
 use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
+use kernel::user_ptr::UserSlicePtr;
 use kernel::{bindings, drm, xarray};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::File;
@@ -27,7 +29,7 @@ struct Vm {
 
 /// Trait implemented by queue implementations (Render and Compute).
 pub(crate) trait Queue: Send + Sync {
-    fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result;
+    fn submit(&self, cmd: &bindings::drm_asahi_command, id: u64) -> Result;
 }
 
 /// State associated with a client.
@@ -79,40 +81,50 @@ impl drm::file::DriverFile for File {
     }
 }
 
-macro_rules! param {
-    ($name:ident) => {
-        kernel::macros::concat_idents!(bindings::drm_asahi_param_DRM_ASAHI_PARAM_, $name)
-    };
-}
-
 impl File {
     /// IOCTL: get_param: Get a driver parameter value.
-    pub(crate) fn get_param(
+    pub(crate) fn get_params(
         device: &AsahiDevice,
-        data: &mut bindings::drm_asahi_get_param,
+        data: &mut bindings::drm_asahi_get_params,
         file: &DrmFile,
     ) -> Result<u32> {
-        mod_dev_dbg!(device, "[File {}]: IOCTL: get_param", file.id);
+        mod_dev_dbg!(device, "[File {}]: IOCTL: get_params", file.id);
 
         let gpu = &device.data().gpu;
 
-        let value: u64 = match data.param {
-            param!(UNSTABLE_UABI_VERSION) => bindings::DRM_ASAHI_UNSTABLE_UABI_VERSION as u64,
-            param!(GPU_GENERATION) => gpu.get_dyncfg().id.gpu_gen as u32 as u64,
-            param!(GPU_VARIANT) => gpu.get_dyncfg().id.gpu_variant as u32 as u64,
-            param!(GPU_REVISION) => gpu.get_dyncfg().id.gpu_rev as u32 as u64,
-            param!(CHIP_ID) => gpu.get_cfg().chip_id as u64,
-            param!(FEAT_COMPAT) => gpu.get_cfg().gpu_feat_compat,
-            param!(FEAT_INCOMPAT) => gpu.get_cfg().gpu_feat_incompat,
-            param!(VM_PAGE_SIZE) => mmu::UAT_PGSZ as u64,
-            param!(VM_USER_START) => VM_USER_START,
-            param!(VM_USER_END) => VM_USER_END,
-            param!(VM_SHADER_START) => VM_SHADER_START,
-            param!(VM_SHADER_END) => VM_SHADER_END,
-            _ => return Err(EINVAL),
+        if data.extensions != 0 || data.param_group != 0 || data.pad != 0 {
+            return Err(EINVAL);
+        }
+
+        let params = bindings::drm_asahi_params_global {
+            unstable_uabi_version: bindings::DRM_ASAHI_UNSTABLE_UABI_VERSION,
+            pad0: 0,
+            feat_compat: gpu.get_cfg().gpu_feat_compat,
+            feat_incompat: gpu.get_cfg().gpu_feat_incompat,
+            gpu_generation: gpu.get_dyncfg().id.gpu_gen as u32,
+            gpu_variant: gpu.get_dyncfg().id.gpu_variant as u32,
+            gpu_revision: gpu.get_dyncfg().id.gpu_rev as u32,
+            chip_id: gpu.get_cfg().chip_id,
+            vm_page_size: mmu::UAT_PGSZ as u32,
+            pad1: 0,
+            vm_user_start: VM_USER_START,
+            vm_user_end: VM_USER_END,
+            vm_shader_start: VM_SHADER_START,
+            vm_shader_end: VM_SHADER_END,
+            max_commands_per_submission: 1024,
+            max_pending_commands: 3072,
+            max_attachments: 16,
         };
 
-        data.value = value;
+        let size =
+            core::mem::size_of::<bindings::drm_asahi_params_global>().min(data.size.try_into()?);
+
+        // SAFETY: We only write to this userptr once, so there are no TOCTOU issues.
+        let mut params_writer =
+            unsafe { UserSlicePtr::new(data.pointer as usize as *mut _, size).writer() };
+
+        // SAFETY: `size` is at most the sizeof of `params`
+        unsafe { params_writer.write_raw(&params as *const _ as *const u8, size)? };
 
         Ok(0)
     }
@@ -123,6 +135,10 @@ impl File {
         data: &mut bindings::drm_asahi_vm_create,
         file: &DrmFile,
     ) -> Result<u32> {
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
+
         let gpu = &device.data().gpu;
         let file_id = file.id;
         let vm = gpu.new_vm(file_id)?;
@@ -186,6 +202,10 @@ impl File {
         data: &mut bindings::drm_asahi_vm_destroy,
         file: &DrmFile,
     ) -> Result<u32> {
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
+
         if file.vms.remove(data.vm_id as usize).is_none() {
             Err(ENOENT)
         } else {
@@ -205,6 +225,10 @@ impl File {
             file.id,
             data.size
         );
+
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
 
         if (data.flags & !bindings::ASAHI_GEM_WRITEBACK) != 0 {
             return Err(EINVAL);
@@ -239,6 +263,10 @@ impl File {
             data.handle
         );
 
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
+
         if data.flags != 0 {
             return Err(EINVAL);
         }
@@ -265,6 +293,10 @@ impl File {
             data.range,
             data.addr
         );
+
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
 
         if data.offset != 0 {
             return Err(EINVAL); // Not supported yet
@@ -339,15 +371,29 @@ impl File {
 
         mod_dev_dbg!(
             device,
-            "[File {} VM {}]: Creating queue type={:?} prio={:?} flags={:#x?}",
+            "[File {} VM {}]: Creating queue caps={:?} prio={:?} flags={:#x?}",
             file_id,
             data.vm_id,
-            data.queue_type,
+            data.queue_caps,
             data.priority,
             data.flags,
         );
 
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
+
         if data.flags != 0 {
+            return Err(EINVAL);
+        }
+
+        if data.queue_caps == 0
+            || (data.queue_caps
+                & !(bindings::drm_asahi_queue_cap_DRM_ASAHI_QUEUE_CAP_RENDER
+                    | bindings::drm_asahi_queue_cap_DRM_ASAHI_QUEUE_CAP_BLIT
+                    | bindings::drm_asahi_queue_cap_DRM_ASAHI_QUEUE_CAP_COMPUTE))
+                != 0
+        {
             return Err(EINVAL);
         }
 
@@ -363,6 +409,9 @@ impl File {
         // Drop the vms lock eagerly
         core::mem::drop(file_vm);
 
+        todo!();
+
+        /*
         let queue = match data.queue_type {
             bindings::drm_asahi_queue_type_DRM_ASAHI_QUEUE_RENDER => device
                 .data()
@@ -379,6 +428,7 @@ impl File {
         resv.store(Arc::try_new(queue)?)?;
 
         Ok(0)
+        */
     }
 
     /// IOCTL: queue_destroy: Destroy a command submission queue.
@@ -387,6 +437,10 @@ impl File {
         data: &mut bindings::drm_asahi_queue_destroy,
         file: &DrmFile,
     ) -> Result<u32> {
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
+
         if file.queues.remove(data.queue_id as usize).is_none() {
             Err(ENOENT)
         } else {
@@ -400,12 +454,20 @@ impl File {
         data: &mut bindings::drm_asahi_submit,
         file: &DrmFile,
     ) -> Result<u32> {
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
+
         debug::update_debug_flags();
 
         let gpu = &device.data().gpu;
         gpu.update_globals();
 
+        todo!();
+
         /* Upgrade to Arc<T> to drop the XArray lock early */
+
+        /*
         let queue: Arc<Box<dyn Queue>> = file
             .queues
             .get(data.queue_id.try_into()?)
@@ -435,6 +497,7 @@ impl File {
         } else {
             Ok(0)
         }
+        */
     }
 
     /// Returns the unique file ID for this `File`.
