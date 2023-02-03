@@ -87,3 +87,26 @@ impl<T: DriverFile> Deref for File<T> {
         unsafe { &*(self.file().driver_priv as *const T) }
     }
 }
+
+impl<T: DriverFile> super::private::Sealed for File<T> {}
+
+/// Generic trait to allow users that don't care about driver specifics to accept any File<T>.
+///
+/// # Safety
+/// Must only be implemented for File<T> and return the pointer, following the normal invariants
+/// of that type.
+pub unsafe trait GenericFile: super::private::Sealed {
+    /// Returns the raw const pointer to the `struct drm_file`
+    fn raw(&self) -> *const bindings::drm_file;
+    /// Returns the raw mut pointer to the `struct drm_file`
+    fn raw_mut(&mut self) -> *mut bindings::drm_file;
+}
+
+unsafe impl<T: DriverFile> GenericFile for File<T> {
+    fn raw(&self) -> *const bindings::drm_file {
+        self.raw
+    }
+    fn raw_mut(&mut self) -> *mut bindings::drm_file {
+        self.raw
+    }
+}
