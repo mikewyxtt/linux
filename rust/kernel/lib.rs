@@ -22,6 +22,7 @@
 #![feature(dispatch_from_dyn)]
 #![feature(doc_cfg)]
 #![feature(duration_constants)]
+#![feature(new_uninit)]
 #![feature(ptr_metadata)]
 #![feature(receiver_trait)]
 #![feature(unsize)]
