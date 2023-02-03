@@ -49,6 +49,8 @@ pub mod cred;
 pub mod delay;
 pub mod device;
 pub mod driver;
+#[cfg(CONFIG_DMA_SHARED_BUFFER)]
+pub mod dma_fence;
 #[cfg(CONFIG_DRM)]
 pub mod drm;
 pub mod error;

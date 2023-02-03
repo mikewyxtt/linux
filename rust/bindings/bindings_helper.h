@@ -16,6 +16,8 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/clk.h>
+#include <linux/dma-fence.h>
+#include <linux/dma-fence-chain.h>
 #include <linux/errname.h>
 #include <linux/file.h>
 #include <linux/fs.h>
