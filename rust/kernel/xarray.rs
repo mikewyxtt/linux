@@ -254,7 +254,7 @@ impl<T: PointerWrapper> XArray<T> {
     /// Reserve a new index in the array.
     ///
     /// Returns a `Reservation` object, which can then be used to store a value at this index or
-    // otherwise free it for reuse.
+    /// otherwise free it for reuse.
     pub fn reserve(&self) -> Result<Reservation<'_, T>> {
         Ok(Reservation(self, self.alloc(None)?, PhantomData))
     }

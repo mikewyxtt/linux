@@ -6,6 +6,7 @@ use super::event;
 use super::types::*;
 use crate::event::EventValue;
 use crate::{default_zeroed, trivial_gpustruct};
+use kernel::sync::Arc;
 
 #[derive(Debug)]
 #[repr(u32)]
@@ -116,7 +117,7 @@ pub(crate) mod raw {
     pub(crate) struct QueueInfo<'a> {
         pub(crate) state: GpuPointer<'a, super::RingState>,
         pub(crate) ring: GpuPointer<'a, &'a [u64]>,
-        pub(crate) notifier_list: GpuWeakPointer<event::NotifierList>,
+        pub(crate) notifier_list: GpuPointer<'a, event::NotifierList>,
         pub(crate) gpu_buf: GpuPointer<'a, &'a [u8]>,
         pub(crate) gpu_rptr1: AtomicU32,
         pub(crate) gpu_rptr2: AtomicU32,
@@ -138,7 +139,7 @@ pub(crate) mod raw {
         pub(crate) unk_9c: u32,
         #[ver(V >= V13_2)]
         pub(crate) unk_a0_0: u32,
-        pub(crate) gpu_context: GpuWeakPointer<super::GpuContextData>,
+        pub(crate) gpu_context: GpuPointer<'a, super::GpuContextData>,
         pub(crate) unk_a8: U64,
         #[ver(V >= V13_2)]
         pub(crate) unk_b0: u32,
@@ -157,6 +158,8 @@ pub(crate) struct QueueInfo {
     pub(crate) state: GpuObject<RingState>,
     pub(crate) ring: GpuArray<u64>,
     pub(crate) gpu_buf: GpuArray<u8>,
+    pub(crate) notifier_list: Arc<GpuObject<event::NotifierList>>,
+    pub(crate) gpu_context: Arc<GpuObject<GpuContextData>>,
 }
 
 #[versions(AGX)]

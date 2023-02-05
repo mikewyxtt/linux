@@ -29,7 +29,9 @@ use crate::box_in_place;
 use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::fw::channels::PipeType;
-use crate::{alloc, buffer, channel, event, fw, gem, hw, initdata, mem, mmu, regs, workqueue};
+use crate::{
+    alloc, buffer, channel, event, fw, gem, hw, initdata, mem, mmu, queue, regs, workqueue,
+};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Gpu;
 
@@ -195,7 +197,6 @@ pub(crate) trait GpuManager: Send + Sync {
     fn new_vm(&self, file_id: u64) -> Result<mmu::Vm>;
     /// Bind a `Vm` to an available slot and return the `VmBind`.
     fn bind_vm(&self, vm: &mmu::Vm) -> Result<mmu::VmBind>;
-    /*
     /// Create a new user command queue.
     fn new_queue(
         &self,
@@ -203,8 +204,8 @@ pub(crate) trait GpuManager: Send + Sync {
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
         priority: u32,
-    ) -> Result<Box<dyn file::Queue>>;
-    */
+        caps: u32,
+    ) -> Result<Box<dyn queue::Queue>>;
     /// Return a reference to the global `SequenceIDs` instance.
     fn ids(&self) -> &SequenceIDs;
     /// Kick the firmware (wake it up if asleep).
@@ -639,7 +640,7 @@ impl GpuManager::ver {
 
     /// Mark work associated with currently in-progress event slots as failed, after a fault or
     /// timeout.
-    fn mark_pending_events(&self, culprit_slot: Option<u32>, error: workqueue::BatchError) {
+    fn mark_pending_events(&self, culprit_slot: Option<u32>, error: workqueue::WorkError) {
         dev_err!(self.dev, "  Pending events:\n");
 
         self.initdata.globals.with(|raw, _inner| {
@@ -658,7 +659,7 @@ impl GpuManager::ver {
                         wait_value
                     );
                     let error = if culprit_slot.is_some() && culprit_slot != Some(slot) {
-                        workqueue::BatchError::Killed
+                        workqueue::WorkError::Killed
                     } else {
                         error
                     };
@@ -728,19 +729,19 @@ impl GpuManager::ver {
         self.dyncfg.id.core_masks_packed.as_slice()
     }
 
-    /// Submit a batch to a submission pipe to tell the firmware to start processing it.
-    pub(crate) fn submit_batch(&self, batch: workqueue::BatchBuilder::ver<'_>) -> Result {
-        let pipe_type = batch.pipe_type();
+    /// Kick a submission pipe for a submitted job to tell the firmware to start processing it.
+    pub(crate) fn run_job(&self, job: workqueue::JobSubmission::ver<'_>) -> Result {
+        let pipe_type = job.pipe_type();
         let pipes = match pipe_type {
             PipeType::Vertex => &self.pipes.vtx,
             PipeType::Fragment => &self.pipes.frag,
             PipeType::Compute => &self.pipes.comp,
         };
 
-        let index: usize = batch.priority() as usize;
+        let index: usize = job.priority() as usize;
         let mut pipe = pipes.get(index).ok_or(EIO)?.lock();
 
-        batch.submit(&mut pipe)?;
+        job.run(&mut pipe);
 
         let mut guard = self.rtkit.lock();
         let rtk = guard.as_mut().unwrap();
@@ -820,17 +821,17 @@ impl GpuManager for GpuManager::ver {
         self.uat.bind(vm)
     }
 
-    /*
     fn new_queue(
         &self,
         vm: mmu::Vm,
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
         priority: u32,
-    ) -> Result<Box<dyn file::Queue>> {
+        caps: u32,
+    ) -> Result<Box<dyn queue::Queue>> {
         let mut kalloc = self.alloc();
         let id = self.ids.queue.next();
-        Ok(Box::try_new(render::RenderQueue::ver::new(
+        Ok(Box::try_new(queue::Queue::ver::new(
             &self.dev,
             vm,
             &mut kalloc,
@@ -840,9 +841,9 @@ impl GpuManager for GpuManager::ver {
             &self.buffer_mgr,
             id,
             priority,
+            caps,
         )?)?)
     }
-    */
 
     fn kick_firmware(&self) -> Result {
         let mut guard = self.rtkit.lock();
@@ -958,7 +959,7 @@ impl GpuManager for GpuManager::ver {
         dev_err!(self.dev, "  Event slot: {}\n", event_slot);
         dev_err!(self.dev, "  Timeout count: {}\n", counter);
         self.get_fault_info();
-        self.mark_pending_events(Some(event_slot), workqueue::BatchError::Timeout);
+        self.mark_pending_events(Some(event_slot), workqueue::WorkError::Timeout);
         self.recover();
     }
 
@@ -971,8 +972,8 @@ impl GpuManager for GpuManager::ver {
         dev_err!(self.dev, "  |________|  \n");
         dev_err!(self.dev, "GPU fault nya~!!!!!\n");
         let error = match self.get_fault_info() {
-            Some(info) => workqueue::BatchError::Fault(info),
-            None => workqueue::BatchError::Unknown,
+            Some(info) => workqueue::WorkError::Fault(info),
+            None => workqueue::WorkError::Unknown,
         };
         self.mark_pending_events(None, error);
         self.recover();

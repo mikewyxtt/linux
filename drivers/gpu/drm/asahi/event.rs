@@ -61,6 +61,20 @@ impl EventValue {
         self.0 = self.0.wrapping_add(0x100);
     }
 
+    /// Increments this `EventValue` in place by a certain count.
+    pub(crate) fn add(&mut self, val: u32) {
+        self.0 = self
+            .0
+            .wrapping_add(val.checked_mul(0x100).expect("Adding too many events"));
+    }
+
+    /// Increments this `EventValue` in place by a certain count.
+    pub(crate) fn sub(&mut self, val: u32) {
+        self.0 = self
+            .0
+            .wrapping_sub(val.checked_mul(0x100).expect("Subtracting too many events"));
+    }
+
     /// Computes the delta between this event and another event.
     pub(crate) fn delta(&self, other: &EventValue) -> i32 {
         self.0.wrapping_sub(other.0) as i32
@@ -185,7 +199,7 @@ impl EventManager {
     }
 
     /// Marks the owner of an event as having lost its work due to a GPU error.
-    pub(crate) fn mark_error(&self, slot: u32, wait_value: u32, error: workqueue::BatchError) {
+    pub(crate) fn mark_error(&self, slot: u32, wait_value: u32, error: workqueue::WorkError) {
         match self
             .alloc
             .with_inner(|inner| inner.owners[slot as usize].as_ref().cloned())

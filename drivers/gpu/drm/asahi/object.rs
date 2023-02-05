@@ -469,9 +469,15 @@ unsafe impl<T: GpuStruct + Sync, U: Allocation<T>> Sync for GpuObject<T, U> {}
 
 /// Trait used to erase the type of a GpuObject, used when we need to keep a list of heterogenous
 /// objects around.
-pub(crate) trait OpaqueGpuObject {}
+pub(crate) trait OpaqueGpuObject: Send + Sync {
+    fn gpu_va(&self) -> NonZeroU64;
+}
 
-impl<T: GpuStruct, U: Allocation<T>> OpaqueGpuObject for GpuObject<T, U> {}
+impl<T: GpuStruct + Sync + Send, U: Allocation<T>> OpaqueGpuObject for GpuObject<T, U> {
+    fn gpu_va(&self) -> NonZeroU64 {
+        Self::gpu_va(self)
+    }
+}
 
 /// An array of raw GPU objects that is only accessible to the GPU (no CPU-side mapping required).
 ///

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
 #![allow(clippy::unusual_byte_groupings)]
+#![allow(unused_imports)]
 
 //! Render work queue.
 //!
@@ -32,118 +33,8 @@ const DEBUG_CLASS: DebugFlags = DebugFlags::Render;
 /// cluster.
 const TILECTL_DISABLE_CLUSTERING: u32 = 1u32 << 0;
 
-/// A render-capable queue from the point of a GPU client.
 #[versions(AGX)]
-pub(crate) struct RenderQueue {
-    dev: AsahiDevice,
-    vm: mmu::Vm,
-    ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
-    wq_vtx: Arc<workqueue::WorkQueue::ver>,
-    wq_frag: Arc<workqueue::WorkQueue::ver>,
-    buffer: buffer::Buffer::ver,
-    gpu_context: GpuObject<fw::workqueue::GpuContextData>,
-    _notifier_list: GpuObject<fw::event::NotifierList>,
-    notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
-    id: u64,
-    #[ver(V >= V13_0B4)]
-    counter: AtomicU64,
-}
-
-#[versions(AGX)]
-impl RenderQueue::ver {
-    /// Create a new render queue.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        dev: &AsahiDevice,
-        vm: mmu::Vm,
-        alloc: &mut gpu::KernelAllocators,
-        ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
-        ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
-        event_manager: Arc<event::EventManager>,
-        mgr: &buffer::BufferManager,
-        id: u64,
-        priority: u32,
-    ) -> Result<RenderQueue::ver> {
-        mod_dev_dbg!(dev, "[RenderQueue {}] Creating renderer\n", id);
-
-        let data = dev.data();
-        let buffer = buffer::Buffer::ver::new(&*data.gpu, alloc, ualloc.clone(), ualloc_priv, mgr)?;
-
-        let tvb_blocks = {
-            let lock = crate::THIS_MODULE.kernel_param_lock();
-            *crate::initial_tvb_size.read(&lock)
-        };
-
-        buffer.ensure_blocks(tvb_blocks)?;
-
-        let gpu_context: GpuObject<fw::workqueue::GpuContextData> = alloc
-            .shared
-            .new_object(Default::default(), |_inner| Default::default())?;
-
-        let mut notifier_list = alloc.private.new_default::<fw::event::NotifierList>()?;
-
-        let self_ptr = notifier_list.weak_pointer();
-        notifier_list.with_mut(|raw, _inner| {
-            raw.list_head.next = Some(inner_weak_ptr!(self_ptr, list_head));
-        });
-
-        let notifier: Arc<GpuObject<fw::event::Notifier::ver>> =
-            Arc::try_new(alloc.private.new_inplace(
-                fw::event::Notifier::ver {
-                    threshold: alloc.shared.new_default::<fw::event::Threshold>()?,
-                },
-                |inner, ptr: &mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
-                    Ok(place!(
-                        ptr,
-                        fw::event::raw::Notifier::ver {
-                            threshold: inner.threshold.gpu_pointer(),
-                            generation: AtomicU32::new(id as u32),
-                            cur_count: AtomicU32::new(0),
-                            unk_10: AtomicU32::new(0x50),
-                            state: Default::default()
-                        }
-                    ))
-                },
-            )?)?;
-
-        // FIXME: keep gpu_context and notifier_list alive as long as work exists on this queue.
-        // Not worth fixing until the syncobj/batch submission refactor.
-
-        let ret = Ok(RenderQueue::ver {
-            dev: dev.clone(),
-            vm,
-            ualloc,
-            wq_vtx: workqueue::WorkQueue::ver::new(
-                alloc,
-                event_manager.clone(),
-                gpu_context.weak_pointer(),
-                notifier_list.weak_pointer(),
-                channel::PipeType::Vertex,
-                id,
-                priority,
-            )?,
-            wq_frag: workqueue::WorkQueue::ver::new(
-                alloc,
-                event_manager,
-                gpu_context.weak_pointer(),
-                notifier_list.weak_pointer(),
-                channel::PipeType::Fragment,
-                id,
-                priority,
-            )?,
-            buffer,
-            gpu_context,
-            _notifier_list: notifier_list,
-            notifier,
-            id,
-            #[ver(V >= V13_0B4)]
-            counter: AtomicU64::new(0),
-        });
-
-        mod_dev_dbg!(dev, "[RenderQueue {}] RenderQueue created\n", id);
-        ret
-    }
-
+impl super::Queue::ver {
     /// Get the appropriate tiling parameters for a given userspace command buffer.
     fn get_tiling_params(
         cmdbuf: &bindings::drm_asahi_cmd_render,
@@ -263,24 +154,20 @@ impl RenderQueue::ver {
             },
         })
     }
-}
 
-#[versions(AGX)]
-impl file::Queue for RenderQueue::ver {
     /// Submit work to a render queue.
-    fn submit(&self, cmd: &bindings::drm_asahi_command, id: u64) -> Result {
+    pub(super) fn submit_render(
+        &mut self,
+        gpu: &gpu::GpuManager::ver,
+        qj: &mut super::QueueJob::ver,
+        cmd: &bindings::drm_asahi_command,
+        id: u64,
+    ) -> Result {
         if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER {
             return Err(EINVAL);
         }
 
         let dev = self.dev.data();
-        let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
-            Some(gpu) => gpu,
-            None => panic!("GpuManager mismatched with RenderQueue!"),
-        };
-
-        // Wake up the firmware early while we get everything ready.
-        let _op_guard = gpu.start_op()?;
 
         let notifier = &self.notifier;
 
@@ -353,9 +240,11 @@ impl file::Queue for RenderQueue::ver {
 
         let tile_info = Self::get_tiling_params(&cmdbuf, if clustering { nclusters } else { 1 })?;
 
-        let tvb_autogrown = self.buffer.auto_grow()?;
+        let buffer = self.buffer.as_mut().ok_or(EINVAL)?;
+
+        let tvb_autogrown = buffer.auto_grow()?;
         if tvb_autogrown {
-            let new_size = self.buffer.block_count() as usize;
+            let new_size = buffer.block_count() as usize;
             cls_dev_dbg!(
                 TVBStats,
                 &self.dev,
@@ -366,7 +255,7 @@ impl file::Queue for RenderQueue::ver {
             );
         }
 
-        let tvb_grown = self.buffer.ensure_blocks(tile_info.min_tvb_blocks)?;
+        let tvb_grown = buffer.ensure_blocks(tile_info.min_tvb_blocks)?;
         if tvb_grown {
             cls_dev_dbg!(
                 TVBStats,
@@ -386,16 +275,15 @@ impl file::Queue for RenderQueue::ver {
             self.dev,
             "[Submission {}] VM slot = {}\n",
             id,
-            vm_bind.slot()
+            qj.vm_bind.slot()
         );
 
-        let mut batches_vtx = workqueue::WorkQueue::ver::begin_batch(&self.wq_vtx, vm_bind.slot())?;
-        let mut batches_frag =
-            workqueue::WorkQueue::ver::begin_batch(&self.wq_frag, vm_bind.slot())?;
+        let sj_vtx = qj.sj_vtx.as_mut().ok_or(EINVAL);
+        let sj_frag = qj.sj_frag.as_mut().ok_or(EINVAL);
 
-        let scene = Arc::try_new(self.buffer.new_scene(kalloc, &tile_info)?)?;
+        let scene = Arc::try_new(buffer.new_scene(kalloc, &tile_info)?)?;
 
-        let next_vtx = batches_vtx.event_value().next();
+        let next_vtx = qj.batches_vtx.event_value().next();
         let next_frag = batches_frag.event_value().next();
         mod_dev_dbg!(
             self.dev,
@@ -502,7 +390,7 @@ impl file::Queue for RenderQueue::ver {
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     work_queue: self.wq_frag.info_pointer(),
                     work_item: ptr,
-                    vm_slot: vm_bind.slot(),
+                    vm_slot: qj.vm_bind.slot(),
                     unk_50: 0x1, // fixed
                     event_generation: self.id as u32,
                     buffer_slot: scene.slot(),
@@ -576,7 +464,7 @@ impl file::Queue for RenderQueue::ver {
                     busy_flag: inner_weak_ptr!(ptr, busy_flag),
                     work_queue: self.wq_frag.info_pointer(),
                     work_item: ptr,
-                    vm_slot: vm_bind.slot(),
+                    vm_slot: qj.vm_bind.slot(),
                     unk_60: 0,
                     unk_758_flag: inner_weak_ptr!(ptr, unk_758_flag),
                     unk_6c: U64(0),
@@ -600,7 +488,7 @@ impl file::Queue for RenderQueue::ver {
                     notifier: notifier.clone(),
                     scene: scene.clone(),
                     micro_seq: builder.build(&mut kalloc.private)?,
-                    vm_bind: vm_bind.clone(),
+                    vm_bind: qj.vm_bind.clone(),
                     aux_fb: self.ualloc.lock().array_empty(0x8000)?,
                     timestamps: timestamps.clone(),
                 })?)
@@ -621,7 +509,7 @@ impl file::Queue for RenderQueue::ver {
                         tag: fw::workqueue::CommandType::RunFragment,
                         #[ver(V >= V13_0B4)]
                         counter: U64(count_frag),
-                        vm_slot: vm_bind.slot(),
+                        vm_slot: qj.vm_bind.slot(),
                         unk_8: 0,
                         microsequence: inner.micro_seq.gpu_pointer(),
                         microsequence_size: inner.micro_seq.len() as u32,
@@ -845,7 +733,7 @@ impl file::Queue for RenderQueue::ver {
                         ptr,
                         fw::buffer::raw::InitBuffer::ver {
                             tag: fw::workqueue::CommandType::InitBuffer,
-                            vm_slot: vm_bind.slot(),
+                            vm_slot: qj.vm_bind.slot(),
                             buffer_slot: inner.scene.slot(),
                             unk_c: 0,
                             block_count: self.buffer.block_count(),
@@ -877,7 +765,7 @@ impl file::Queue for RenderQueue::ver {
                     scene: scene.weak_pointer(),
                     stats,
                     work_queue: self.wq_vtx.info_pointer(),
-                    vm_slot: vm_bind.slot(),
+                    vm_slot: qj.vm_bind.slot(),
                     unk_38: 1, // fixed
                     event_generation: self.id as u32,
                     buffer_slot: scene.slot(),
@@ -944,7 +832,7 @@ impl file::Queue for RenderQueue::ver {
                     buffer: scene.weak_buffer_pointer(),
                     stats,
                     work_queue: self.wq_vtx.info_pointer(),
-                    vm_slot: vm_bind.slot(),
+                    vm_slot: qj.vm_bind.slot(),
                     unk_28: 0x0, // fixed
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     unk_34: 0x0, // fixed
@@ -974,7 +862,7 @@ impl file::Queue for RenderQueue::ver {
                     notifier: notifier.clone(),
                     scene: scene.clone(),
                     micro_seq: builder.build(&mut kalloc.private)?,
-                    vm_bind: vm_bind.clone(),
+                    vm_bind: qj.vm_bind.clone(),
                     timestamps: timestamps,
                 })?)
             },
@@ -987,7 +875,7 @@ impl file::Queue for RenderQueue::ver {
                         tag: fw::workqueue::CommandType::RunVertex,
                         #[ver(V >= V13_0B4)]
                         counter: U64(count_vtx),
-                        vm_slot: vm_bind.slot(),
+                        vm_slot: qj.vm_bind.slot(),
                         unk_8: 0,
                         notifier: inner.notifier.gpu_pointer(),
                         buffer_slot: inner.scene.slot(),
@@ -1214,18 +1102,5 @@ impl file::Queue for RenderQueue::ver {
         }
 
         ret
-    }
-}
-
-#[versions(AGX)]
-impl Drop for RenderQueue::ver {
-    fn drop(&mut self) {
-        let dev = self.dev.data();
-        if dev.gpu.invalidate_context(&self.gpu_context).is_err() {
-            dev_err!(
-                self.dev,
-                "RenderQueue::drop: Failed to invalidate GPU context!\n"
-            );
-        }
     }
 }

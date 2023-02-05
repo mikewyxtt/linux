@@ -23,10 +23,11 @@ pub(crate) enum DebugFlags {
     WorkQueue = 6,
 
     // 8-13: DRM interface, rendering, compute, GPU globals
-    File = 8,
-    Render = 9,
-    Compute = 10,
-    Gpu = 11,
+    Gpu = 8,
+    File = 9,
+    Queue = 10,
+    Render = 11,
+    Compute = 12,
 
     // 14-15: Misc stats
     MemStats = 14,

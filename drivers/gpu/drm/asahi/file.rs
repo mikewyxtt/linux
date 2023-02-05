@@ -9,15 +9,20 @@
 
 use crate::debug::*;
 use crate::driver::AsahiDevice;
-use crate::{alloc, buffer, driver, gem, mmu};
+use crate::{alloc, buffer, driver, gem, mmu, queue};
+use core::mem::MaybeUninit;
 use kernel::drm::gem::BaseObject;
-use kernel::io_buffer::IoBufferWriter;
+use kernel::io_buffer::{IoBufferReader, IoBufferWriter};
 use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
 use kernel::user_ptr::UserSlicePtr;
-use kernel::{bindings, drm, xarray};
+use kernel::{bindings, dma_fence, drm, xarray};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::File;
+
+const MAX_SYNCS_PER_SUBMISSION: u32 = 512;
+const MAX_COMMANDS_PER_SUBMISSION: u32 = 512;
+pub(crate) const MAX_COMMANDS_IN_FLIGHT: u32 = 1024;
 
 /// A client instance of an `mmu::Vm` address space.
 struct Vm {
@@ -27,16 +32,96 @@ struct Vm {
     _dummy_obj: gem::ObjectRef,
 }
 
-/// Trait implemented by queue implementations (Render and Compute).
-pub(crate) trait Queue: Send + Sync {
-    fn submit(&self, cmd: &bindings::drm_asahi_command, id: u64) -> Result;
+/// Sync object from userspace.
+pub(crate) struct SyncItem {
+    pub(crate) syncobj: drm::syncobj::SyncObj,
+    pub(crate) fence: Option<dma_fence::DmaFence>,
+    pub(crate) chain_fence: Option<dma_fence::DmaFenceChain>,
+    pub(crate) timeline_value: u64,
+}
+
+impl SyncItem {
+    fn parse_one(file: &DrmFile, data: bindings::drm_asahi_sync, out: bool) -> Result<SyncItem> {
+        if data.extensions != 0 {
+            return Err(EINVAL);
+        }
+
+        match data.sync_type {
+            bindings::drm_asahi_sync_type_DRM_ASAHI_SYNC_SYNCOBJ => {
+                if data.timeline_value != 0 {
+                    return Err(EINVAL);
+                }
+                let syncobj = drm::syncobj::SyncObj::lookup_handle(file, data.handle)?;
+
+                Ok(SyncItem {
+                    fence: if out {
+                        None
+                    } else {
+                        Some(syncobj.fence_get().ok_or(EINVAL)?)
+                    },
+                    syncobj,
+                    chain_fence: None,
+                    timeline_value: data.timeline_value,
+                })
+            }
+            bindings::drm_asahi_sync_type_DRM_ASAHI_SYNC_TIMELINE_SYNCOBJ => {
+                let syncobj = drm::syncobj::SyncObj::lookup_handle(file, data.handle)?;
+                let fence = if out {
+                    None
+                } else {
+                    Some(
+                        syncobj
+                            .fence_get()
+                            .ok_or(EINVAL)?
+                            .chain_find_seqno(data.timeline_value)?,
+                    )
+                };
+
+                Ok(SyncItem {
+                    fence,
+                    syncobj,
+                    chain_fence: if out {
+                        Some(dma_fence::DmaFenceChain::new()?)
+                    } else {
+                        None
+                    },
+                    timeline_value: data.timeline_value,
+                })
+            }
+            _ => Err(EINVAL),
+        }
+    }
+
+    fn parse_array(file: &DrmFile, ptr: u64, count: u32, out: bool) -> Result<Vec<SyncItem>> {
+        let mut vec = Vec::try_with_capacity(count as usize)?;
+
+        const STRIDE: usize = core::mem::size_of::<bindings::drm_asahi_sync>();
+        let size = STRIDE * count as usize;
+
+        // SAFETY: We only read this once, so there are no TOCTOU issues.
+        let mut reader = unsafe { UserSlicePtr::new(ptr as usize as *mut _, size).reader() };
+
+        for i in 0..count {
+            let mut sync: MaybeUninit<bindings::drm_asahi_sync> = MaybeUninit::uninit();
+
+            // SAFETY: The size of `sync` is STRIDE
+            unsafe { reader.read_raw(sync.as_mut_ptr() as *mut u8, STRIDE)? };
+
+            // SAFETY: All bit patterns in the struct are valid
+            let sync = unsafe { sync.assume_init() };
+
+            vec.try_push(SyncItem::parse_one(file, sync, out)?)?;
+        }
+
+        Ok(vec)
+    }
 }
 
 /// State associated with a client.
 pub(crate) struct File {
     id: u64,
     vms: xarray::XArray<Box<Vm>>,
-    queues: xarray::XArray<Arc<Box<dyn Queue>>>,
+    queues: xarray::XArray<Arc<Mutex<Box<dyn queue::Queue>>>>,
 }
 
 /// Convenience type alias for our DRM `File` type.
@@ -111,9 +196,10 @@ impl File {
             vm_user_end: VM_USER_END,
             vm_shader_start: VM_SHADER_START,
             vm_shader_end: VM_SHADER_END,
-            max_commands_per_submission: 1024,
-            max_pending_commands: 3072,
-            max_attachments: 16,
+            max_syncs_per_submission: MAX_SYNCS_PER_SUBMISSION,
+            max_commands_per_submission: MAX_COMMANDS_PER_SUBMISSION,
+            max_commands_in_flight: MAX_COMMANDS_IN_FLIGHT,
+            max_attachments: crate::microseq::MAX_ATTACHMENTS as u32,
         };
 
         let size =
@@ -226,11 +312,7 @@ impl File {
             data.size
         );
 
-        if data.extensions != 0 {
-            return Err(EINVAL);
-        }
-
-        if (data.flags & !bindings::ASAHI_GEM_WRITEBACK) != 0 {
+        if data.extensions != 0 || (data.flags & !bindings::ASAHI_GEM_WRITEBACK) != 0 {
             return Err(EINVAL);
         }
 
@@ -263,11 +345,7 @@ impl File {
             data.handle
         );
 
-        if data.extensions != 0 {
-            return Err(EINVAL);
-        }
-
-        if data.flags != 0 {
+        if data.extensions != 0 || data.flags != 0 {
             return Err(EINVAL);
         }
 
@@ -379,25 +457,16 @@ impl File {
             data.flags,
         );
 
-        if data.extensions != 0 {
-            return Err(EINVAL);
-        }
-
-        if data.flags != 0 {
-            return Err(EINVAL);
-        }
-
-        if data.queue_caps == 0
+        if data.extensions != 0
+            || data.flags != 0
+            || data.priority > 3
+            || data.queue_caps == 0
             || (data.queue_caps
                 & !(bindings::drm_asahi_queue_cap_DRM_ASAHI_QUEUE_CAP_RENDER
                     | bindings::drm_asahi_queue_cap_DRM_ASAHI_QUEUE_CAP_BLIT
                     | bindings::drm_asahi_queue_cap_DRM_ASAHI_QUEUE_CAP_COMPUTE))
                 != 0
         {
-            return Err(EINVAL);
-        }
-
-        if data.priority > 3 {
             return Err(EINVAL);
         }
 
@@ -409,26 +478,16 @@ impl File {
         // Drop the vms lock eagerly
         core::mem::drop(file_vm);
 
-        todo!();
-
-        /*
-        let queue = match data.queue_type {
-            bindings::drm_asahi_queue_type_DRM_ASAHI_QUEUE_RENDER => device
+        let queue =
+            device
                 .data()
                 .gpu
-                .new_render_queue(vm, ualloc, ualloc_priv, data.priority)?,
-            bindings::drm_asahi_queue_type_DRM_ASAHI_QUEUE_COMPUTE => device
-                .data()
-                .gpu
-                .new_compute_queue(vm, ualloc, data.priority)?,
-            _ => return Err(EINVAL),
-        };
+                .new_queue(vm, ualloc, ualloc_priv, data.priority, data.queue_caps)?;
 
         data.queue_id = resv.index().try_into()?;
-        resv.store(Arc::try_new(queue)?)?;
+        resv.store(Arc::try_new(Mutex::new(queue))?)?;
 
         Ok(0)
-        */
     }
 
     /// IOCTL: queue_destroy: Destroy a command submission queue.
@@ -454,7 +513,12 @@ impl File {
         data: &mut bindings::drm_asahi_submit,
         file: &DrmFile,
     ) -> Result<u32> {
-        if data.extensions != 0 {
+        if data.extensions != 0
+            || data.flags != 0
+            || data.in_sync_count > MAX_SYNCS_PER_SUBMISSION
+            || data.out_sync_count > MAX_SYNCS_PER_SUBMISSION
+            || data.command_count > MAX_COMMANDS_PER_SUBMISSION
+        {
             return Err(EINVAL);
         }
 
@@ -463,12 +527,8 @@ impl File {
         let gpu = &device.data().gpu;
         gpu.update_globals();
 
-        todo!();
-
-        /* Upgrade to Arc<T> to drop the XArray lock early */
-
-        /*
-        let queue: Arc<Box<dyn Queue>> = file
+        // Upgrade to Arc<T> to drop the XArray lock early
+        let queue: Arc<Mutex<Box<dyn queue::Queue>>> = file
             .queues
             .get(data.queue_id.try_into()?)
             .ok_or(ENOENT)?
@@ -483,7 +543,39 @@ impl File {
             data.queue_id,
             id
         );
-        let ret = queue.submit(data, id);
+
+        let in_syncs = SyncItem::parse_array(file, data.in_syncs, data.in_sync_count, false)?;
+        let out_syncs = SyncItem::parse_array(file, data.out_syncs, data.out_sync_count, true)?;
+
+        let result_buf = if data.result_handle != 0 {
+            Some(gem::lookup_handle(file, data.result_handle)?)
+        } else {
+            None
+        };
+
+        let mut commands = Vec::try_with_capacity(data.command_count as usize)?;
+
+        const STRIDE: usize = core::mem::size_of::<bindings::drm_asahi_command>();
+        let size = STRIDE * data.command_count as usize;
+
+        // SAFETY: We only read this once, so there are no TOCTOU issues.
+        let mut reader =
+            unsafe { UserSlicePtr::new(data.commands as usize as *mut _, size).reader() };
+
+        for i in 0..data.command_count {
+            let mut cmd: MaybeUninit<bindings::drm_asahi_command> = MaybeUninit::uninit();
+
+            // SAFETY: The size of `sync` is STRIDE
+            unsafe { reader.read_raw(cmd.as_mut_ptr() as *mut u8, STRIDE)? };
+
+            // SAFETY: All bit patterns in the struct are valid
+            commands.try_push(unsafe { cmd.assume_init() })?;
+        }
+
+        let ret = queue
+            .lock()
+            .submit(id, in_syncs, out_syncs, result_buf, commands);
+
         if let Err(e) = ret {
             dev_info!(
                 device,
@@ -497,7 +589,6 @@ impl File {
         } else {
             Ok(0)
         }
-        */
     }
 
     /// Returns the unique file ID for this `File`.

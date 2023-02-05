@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
 #![allow(clippy::unusual_byte_groupings)]
+#![allow(unused_imports)]
 
 //! Compute work queue.
 //!
@@ -25,104 +26,10 @@ use kernel::user_ptr::UserSlicePtr;
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Compute;
 
-/// A compute-capable queue from the point of a GPU client.
 #[versions(AGX)]
-pub(crate) struct ComputeQueue {
-    dev: AsahiDevice,
-    vm: mmu::Vm,
-    ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
-    wq: Arc<workqueue::WorkQueue::ver>,
-    gpu_context: GpuObject<fw::workqueue::GpuContextData>,
-    _notifier_list: GpuObject<fw::event::NotifierList>,
-    notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
-    id: u64,
-    // Command count for this queue
-    command_count: AtomicU32,
-    // Command count (potentially) shared with other queues
-    // we just implement this locally here.
-    #[ver(V >= V13_0B4)]
-    counter: AtomicU64,
-}
-
-#[versions(AGX)]
-impl ComputeQueue::ver {
-    /// Create a new compute queue.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        dev: &AsahiDevice,
-        vm: mmu::Vm,
-        alloc: &mut gpu::KernelAllocators,
-        ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
-        event_manager: Arc<event::EventManager>,
-        id: u64,
-        priority: u32,
-    ) -> Result<ComputeQueue::ver> {
-        mod_dev_dbg!(dev, "[ComputeQueue {}] Creating compute queue\n", id);
-
-        let gpu_context: GpuObject<fw::workqueue::GpuContextData> = alloc
-            .shared
-            .new_object(Default::default(), |_inner| Default::default())?;
-
-        let mut notifier_list = alloc.private.new_default::<fw::event::NotifierList>()?;
-
-        let self_ptr = notifier_list.weak_pointer();
-        notifier_list.with_mut(|raw, _inner| {
-            raw.list_head.next = Some(inner_weak_ptr!(self_ptr, list_head));
-        });
-
-        let notifier: Arc<GpuObject<fw::event::Notifier::ver>> =
-            Arc::try_new(alloc.private.new_inplace(
-                fw::event::Notifier::ver {
-                    threshold: alloc.shared.new_default::<fw::event::Threshold>()?,
-                },
-                |inner, ptr: &mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
-                    Ok(place!(
-                        ptr,
-                        fw::event::raw::Notifier::ver {
-                            threshold: inner.threshold.gpu_pointer(),
-                            generation: AtomicU32::new(id as u32),
-                            cur_count: AtomicU32::new(0),
-                            unk_10: AtomicU32::new(0x50),
-                            state: Default::default()
-                        }
-                    ))
-                },
-            )?)?;
-
-        // FIXME: keep gpu_context and notifier_list alive as long as work exists on this queue.
-        // Not worth fixing until the syncobj/batch submission refactor.
-
-        let ret = Ok(ComputeQueue::ver {
-            dev: dev.clone(),
-            vm,
-            ualloc,
-            wq: workqueue::WorkQueue::ver::new(
-                alloc,
-                event_manager,
-                gpu_context.weak_pointer(),
-                notifier_list.weak_pointer(),
-                channel::PipeType::Compute,
-                id,
-                priority,
-            )?,
-            gpu_context,
-            _notifier_list: notifier_list,
-            notifier,
-            id,
-            command_count: AtomicU32::new(0),
-            #[ver(V >= V13_0B4)]
-            counter: AtomicU64::new(0),
-        });
-
-        mod_dev_dbg!(dev, "[ComputeQueue {}] ComputeQueue created\n", id);
-        ret
-    }
-}
-
-#[versions(AGX)]
-impl file::Queue for ComputeQueue::ver {
+impl super::Queue::ver {
     /// Submit work to a compute queue.
-    fn submit(&self, cmd: &bindings::drm_asahi_command, id: u64) -> Result {
+    fn submit_compute(&self, cmd: &bindings::drm_asahi_command, id: u64) -> Result {
         if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE {
             return Err(EINVAL);
         }
@@ -485,18 +392,5 @@ impl file::Queue for ComputeQueue::ver {
         }
 
         ret
-    }
-}
-
-#[versions(AGX)]
-impl Drop for ComputeQueue::ver {
-    fn drop(&mut self) {
-        let dev = self.dev.data();
-        if dev.gpu.invalidate_context(&self.gpu_context).is_err() {
-            dev_err!(
-                self.dev,
-                "ComputeQueue::drop: Failed to invalidate GPU context!\n"
-            );
-        }
     }
 }

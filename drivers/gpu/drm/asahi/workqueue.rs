@@ -15,16 +15,17 @@
 
 use crate::debug::*;
 use crate::fw::channels::PipeType;
-use crate::fw::event::NotifierList;
 use crate::fw::types::*;
 use crate::fw::workqueue::*;
+use crate::object::OpaqueGpuObject;
 use crate::{box_in_place, place};
 use crate::{channel, event, fw, gpu, object, regs};
+use core::num::NonZeroU64;
 use core::sync::atomic::Ordering;
 use kernel::{
     bindings,
     prelude::*,
-    sync::{smutex, Arc, CondVar, Guard, Mutex, UniqueArc},
+    sync::{smutex::Mutex, Arc, Guard, UniqueArc},
     Opaque,
 };
 
@@ -32,7 +33,7 @@ const DEBUG_CLASS: DebugFlags = DebugFlags::WorkQueue;
 
 /// An enum of possible errors that might cause a piece of work to fail execution.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum BatchError {
+pub(crate) enum WorkError {
     /// GPU timeout (command execution took too long).
     Timeout,
     /// GPU MMU fault (invalid access).
@@ -43,39 +44,79 @@ pub(crate) enum BatchError {
     Killed,
 }
 
-impl From<BatchError> for kernel::error::Error {
-    fn from(err: BatchError) -> Self {
+impl From<WorkError> for kernel::error::Error {
+    fn from(err: WorkError) -> Self {
         match err {
-            BatchError::Timeout => ETIMEDOUT,
+            WorkError::Timeout => ETIMEDOUT,
             // Not EFAULT because that's for userspace faults
-            BatchError::Fault(_) => EIO,
-            BatchError::Unknown => ENODATA,
-            BatchError::Killed => ECANCELED,
+            WorkError::Fault(_) => EIO,
+            WorkError::Unknown => ENODATA,
+            WorkError::Killed => ECANCELED,
         }
     }
 }
 
-/// A batch of commands that has been submitted to a workqueue as one unit.
-pub(crate) struct Batch {
-    value: event::EventValue,
-    commands: usize,
-    // TODO: make abstraction
-    completion: Opaque<bindings::completion>,
+struct SubmittedWork<O, C>
+where
+    O: OpaqueGpuObject,
+    C: FnOnce(O, Option<WorkError>) + Send + Sync + 'static,
+{
+    object: O,
+    value: EventValue,
+    error: Option<WorkError>,
     wptr: u32,
     vm_slot: u32,
-    error: smutex::Mutex<Option<BatchError>>,
+    callback: Option<C>,
 }
 
-/// SAFETY: The bindings::completion is safe to send/share across threads
-unsafe impl Send for Batch {}
-unsafe impl Sync for Batch {}
+trait GenSubmittedWork: Send + Sync {
+    fn gpu_va(&self) -> NonZeroU64;
+    fn value(&self) -> event::EventValue;
+    fn wptr(&self) -> u32;
+    fn mark_error(&mut self, value: event::EventValue, error: WorkError) -> bool;
+    fn complete(self: Box<Self>);
+}
 
-impl Batch {
-    /// Wait for the batch to complete execution and return the execution status.
-    pub(crate) fn wait(&self) -> core::result::Result<(), BatchError> {
-        // TODO: Properly abstract this.
-        unsafe { bindings::wait_for_completion(self.completion.get()) };
-        self.error.lock().map_or(Ok(()), Err)
+impl<O: OpaqueGpuObject, C: FnOnce(O, Option<WorkError>) + Send + Sync> GenSubmittedWork
+    for SubmittedWork<O, C>
+{
+    fn gpu_va(&self) -> NonZeroU64 {
+        self.object.gpu_va()
+    }
+
+    fn value(&self) -> event::EventValue {
+        self.value
+    }
+
+    fn wptr(&self) -> u32 {
+        self.wptr
+    }
+
+    fn complete(self: Box<Self>) {
+        if let SubmittedWork {
+            object,
+            value,
+            error,
+            wptr,
+            vm_slot,
+            callback: Some(callback),
+        } = *self
+        {
+            callback(object, error);
+        }
+    }
+
+    fn mark_error(&mut self, value: event::EventValue, error: WorkError) -> bool {
+        if self.value <= value {
+            mod_pr_debug!("WorkQueue: Command at value {:#x?} failed", self.value,);
+            self.error = Some(match error {
+                WorkError::Fault(info) if info.vm_slot != self.vm_slot => WorkError::Killed,
+                err => err,
+            });
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -88,11 +129,13 @@ struct WorkQueueInner {
     pipe_type: PipeType,
     size: u32,
     wptr: u32,
-    pending: Vec<Box<dyn object::OpaqueGpuObject + Send + Sync>>,
-    batches: Vec<Arc<Batch>>,
+    pending: Vec<Box<dyn GenSubmittedWork>>,
     last_token: Option<event::Token>,
+    pending_jobs: usize,
     event: Option<(event::Event, event::EventValue)>,
     priority: u32,
+    commit_seq: u64,
+    submit_seq: u64,
 }
 
 /// An instance of a work queue.
@@ -100,11 +143,7 @@ struct WorkQueueInner {
 pub(crate) struct WorkQueue {
     info_pointer: GpuWeakPointer<QueueInfo::ver>,
     inner: Mutex<WorkQueueInner::ver>,
-    cond: CondVar,
 }
-
-/// The default work queue size.
-const WQ_SIZE: u32 = 0x500;
 
 #[versions(AGX)]
 impl WorkQueueInner::ver {
@@ -117,37 +156,287 @@ impl WorkQueueInner::ver {
     }
 }
 
-/// An in-progress batch of commands to be submitted to a WorkQueue. Further commands can be added
-/// before submission.
 #[versions(AGX)]
-pub(crate) struct BatchBuilder<'a> {
-    queue: &'a WorkQueue::ver,
-    inner: Guard<'a, Mutex<WorkQueueInner::ver>>,
-    commands: usize,
+pub(crate) struct Job {
+    wq: Arc<WorkQueue::ver>,
+    wq_size: u32,
+    stamp_pointer: GpuWeakPointer<Stamp>,
+    fw_stamp_pointer: GpuWeakPointer<FwStamp>,
     wptr: u32,
-    vm_slot: u32,
+    cmd_wptr: u32,
+    start_value: EventValue,
+    cur_value: EventValue,
+    pending: Vec<Box<dyn GenSubmittedWork>>,
+    committed: bool,
+    submitted: bool,
+    start_seq: u64,
+    event_count: usize,
+}
+
+#[versions(AGX)]
+pub(crate) struct JobSubmission<'a> {
+    inner: Guard<'a, Mutex<WorkQueueInner::ver>>,
+    event_value: EventValue,
+    wptr: u32,
+    event_count: usize,
+    command_count: usize,
+}
+
+#[versions(AGX)]
+impl Job::ver {
+    pub(crate) fn stamp_pointer(&self) -> GpuWeakPointer<Stamp> {
+        self.stamp_pointer
+    }
+
+    pub(crate) fn fw_stamp_pointer(&self) -> GpuWeakPointer<FwStamp> {
+        self.fw_stamp_pointer
+    }
+
+    pub(crate) fn cur_event_value(&self) -> event::EventValue {
+        self.cur_value
+    }
+
+    pub(crate) fn next_event_value(&self) -> event::EventValue {
+        self.cur_value.next()
+    }
+
+    pub(crate) fn advance_event_value(&mut self) {
+        self.event_count += 1;
+        self.cur_value.increment();
+    }
+
+    pub(crate) fn add<O: object::OpaqueGpuObject + 'static>(
+        &mut self,
+        command: O,
+        vm_slot: u32,
+        callback: Option<impl FnOnce(O, Option<WorkError>) + Sync + Send + 'static>,
+    ) -> Result {
+        if self.committed {
+            pr_err!("WorkQueue: Tried to mutate committed Job");
+            return Err(EINVAL);
+        }
+
+        self.pending.try_push(Box::try_new(SubmittedWork::<_, _> {
+            object: command,
+            value: self.next_event_value(),
+            error: None,
+            callback,
+            wptr: self.cmd_wptr,
+            vm_slot,
+        })?)?;
+
+        self.cmd_wptr = (self.cmd_wptr + 1) % self.wq_size;
+
+        Ok(())
+    }
+
+    pub(crate) fn commit(&mut self) -> Result {
+        if self.committed {
+            pr_err!("WorkQueue: Tried to commit committed Job");
+            return Err(EINVAL);
+        }
+
+        if self.pending.is_empty() {
+            pr_err!("WorkQueue: Job::commit() with no commands");
+            return Err(EINVAL);
+        }
+
+        let mut inner = self.wq.inner.lock();
+
+        let ev = inner.event.as_mut().expect("WorkQueue: Job lost its event");
+
+        if ev.1 != self.start_value {
+            pr_err!("WorkQueue: Job::commit() out of order (event)");
+            return Err(EINVAL);
+        }
+
+        ev.1 = self.cur_value;
+        inner.commit_seq += self.pending.len() as u64;
+        self.committed = true;
+
+        Ok(())
+    }
+
+    pub(crate) fn can_submit(&self) -> bool {
+        self.wq.free_space() > self.pending.len()
+    }
+
+    pub(crate) fn submit(&mut self) -> Result<JobSubmission::ver<'_>> {
+        if !self.committed {
+            pr_err!("WorkQueue: Tried to submit uncommitted Job");
+            return Err(EINVAL);
+        }
+
+        if self.submitted {
+            pr_err!("WorkQueue: Tried to submit Job twice");
+            return Err(EINVAL);
+        }
+
+        if self.pending.is_empty() {
+            pr_err!("WorkQueue: Job::submit() with no commands");
+            return Err(EINVAL);
+        }
+
+        let mut inner = self.wq.inner.lock();
+
+        if inner.submit_seq != self.start_seq {
+            pr_err!("WorkQueue: Job::submit() out of order (start_seq)");
+            return Err(EINVAL);
+        }
+
+        if inner.commit_seq < (self.start_seq + self.pending.len() as u64) {
+            pr_err!("WorkQueue: Job::submit() out of order (commit_seq)");
+            return Err(EINVAL);
+        }
+
+        if self.wptr != inner.wptr {
+            pr_err!("WorkQueue: Job::submit() out of order (wptr)");
+            return Err(EINVAL);
+        }
+
+        let mut wptr = self.wptr;
+        let command_count = self.pending.len();
+
+        if inner.free_space() <= command_count {
+            pr_err!("WorkQueue: Job does not fit in ring buffer");
+            return Err(EBUSY);
+        }
+
+        inner.pending.try_reserve(command_count)?;
+
+        for command in self.pending.drain(..) {
+            let next_wptr = (wptr + 1) % inner.size;
+            assert!(inner.doneptr() != next_wptr);
+            inner.info.ring[self.wptr as usize] = command.gpu_va().get();
+            wptr = next_wptr;
+
+            // Cannot fail, since we did a try_reserve(1) above
+            inner
+                .pending
+                .try_push(command)
+                .expect("try_push() failed after try_reserve()");
+        }
+
+        self.submitted = true;
+
+        Ok(JobSubmission::ver {
+            inner,
+            event_value: self.cur_value,
+            wptr,
+            command_count,
+            event_count: self.event_count,
+        })
+    }
+}
+
+#[versions(AGX)]
+impl<'a> JobSubmission::ver<'a> {
+    pub(crate) fn run(mut self, channel: &mut channel::PipeChannel::ver) {
+        self.inner
+            .info
+            .state
+            .with(|raw, _inner| raw.cpu_wptr.store(self.wptr, Ordering::Release));
+
+        self.inner.wptr = self.wptr;
+
+        let event = self
+            .inner
+            .event
+            .as_mut()
+            .expect("JobSubmission lost its event");
+
+        event.1 = self.event_value;
+        let event_slot = event.0.slot();
+
+        let msg = fw::channels::RunWorkQueueMsg::ver {
+            pipe_type: self.inner.pipe_type,
+            work_queue: Some(self.inner.info.weak_pointer()),
+            wptr: self.inner.wptr,
+            event_slot,
+            is_new: self.inner.new,
+            __pad: Default::default(),
+        };
+        channel.send(&msg);
+        self.inner.new = false;
+
+        self.inner.submit_seq += self.command_count as u64;
+
+        core::mem::forget(self);
+    }
+
+    pub(crate) fn pipe_type(&self) -> PipeType {
+        self.inner.pipe_type
+    }
+
+    pub(crate) fn priority(&self) -> u32 {
+        self.inner.priority
+    }
+}
+
+#[versions(AGX)]
+impl Drop for Job::ver {
+    fn drop(&mut self) {
+        let mut inner = self.wq.inner.lock();
+
+        if self.committed && !self.submitted {
+            let event = inner.event.as_mut().expect("Job lost its event");
+            event.1.sub(self.event_count as u32);
+            inner.commit_seq -= self.pending.len() as u64;
+        }
+
+        inner.pending_jobs -= 1;
+
+        if inner.pending.is_empty() && inner.pending_jobs == 0 {
+            inner.event = None;
+        }
+    }
+}
+
+#[versions(AGX)]
+impl<'a> Drop for JobSubmission::ver<'a> {
+    fn drop(&mut self) {
+        let inner = &mut self.inner;
+        let new_len = inner.pending.len() - self.command_count;
+        inner.pending.truncate(new_len);
+
+        let event = inner.event.as_mut().expect("JobSubmission lost its event");
+        event.1.sub(self.event_count as u32);
+        inner.commit_seq -= self.command_count as u64;
+    }
+}
+
+#[versions(AGX)]
+impl WorkQueueInner::ver {
+    /// Return the number of free entries in the workqueue
+    pub(crate) fn free_space(&self) -> usize {
+        self.size as usize - self.pending.len() - 1
+    }
 }
 
 #[versions(AGX)]
 impl WorkQueue::ver {
     /// Create a new WorkQueue of a given type and priority.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         alloc: &mut gpu::KernelAllocators,
         event_manager: Arc<event::EventManager>,
-        gpu_context: GpuWeakPointer<GpuContextData>,
-        notifier_list: GpuWeakPointer<NotifierList>,
+        gpu_context: Arc<GpuObject<fw::workqueue::GpuContextData>>,
+        notifier_list: Arc<GpuObject<fw::event::NotifierList>>,
         pipe_type: PipeType,
         id: u64,
         priority: u32,
+        size: u32,
     ) -> Result<Arc<WorkQueue::ver>> {
         let mut info = box_in_place!(QueueInfo::ver {
             state: alloc.shared.new_default::<RingState>()?,
-            ring: alloc.shared.array_empty(WQ_SIZE as usize)?,
+            ring: alloc.shared.array_empty(size as usize)?,
             gpu_buf: alloc.private.array_empty(0x2c18)?,
+            notifier_list: notifier_list,
+            gpu_context: gpu_context,
         })?;
 
         info.state.with_mut(|raw, _inner| {
-            raw.rb_size = WQ_SIZE;
+            raw.rb_size = size;
         });
 
         let inner = WorkQueueInner::ver {
@@ -158,7 +447,7 @@ impl WorkQueue::ver {
                     raw::QueueInfo::ver {
                         state: inner.state.gpu_pointer(),
                         ring: inner.ring.gpu_pointer(),
-                        notifier_list: notifier_list,
+                        notifier_list: inner.notifier_list.gpu_pointer(),
                         gpu_buf: inner.gpu_buf.gpu_pointer(),
                         gpu_rptr1: Default::default(),
                         gpu_rptr2: Default::default(),
@@ -180,7 +469,7 @@ impl WorkQueue::ver {
                         unk_9c: 0,
                         #[ver(V >= V13_2)]
                         unk_a0_0: 0,
-                        gpu_context: gpu_context,
+                        gpu_context: inner.gpu_context.gpu_pointer(),
                         unk_a8: Default::default(),
                         #[ver(V >= V13_2)]
                         unk_b0: 0,
@@ -189,40 +478,21 @@ impl WorkQueue::ver {
             })?,
             new: true,
             pipe_type,
-            size: WQ_SIZE,
+            size,
             wptr: 0,
             pending: Vec::new(),
-            batches: Vec::new(),
             last_token: None,
             event: None,
             priority,
+            pending_jobs: 0,
+            commit_seq: 0,
+            submit_seq: 0,
         };
 
-        let mut queue = Pin::from(UniqueArc::try_new(Self {
+        Arc::try_new(Self {
             info_pointer: inner.info.weak_pointer(),
-            // SAFETY: `condvar_init!` is called below.
-            cond: unsafe { CondVar::new() },
-            // SAFETY: `mutex_init!` is called below.
-            inner: unsafe { Mutex::new(inner) },
-        })?);
-
-        // SAFETY: `cond` is pinned when `queue` is.
-        let pinned = unsafe { queue.as_mut().map_unchecked_mut(|s| &mut s.cond) };
-        match pipe_type {
-            PipeType::Vertex => kernel::condvar_init!(pinned, "WorkQueue::cond (Vertex)"),
-            PipeType::Fragment => kernel::condvar_init!(pinned, "WorkQueue::cond (Fragment)"),
-            PipeType::Compute => kernel::condvar_init!(pinned, "WorkQueue::cond (Compute)"),
-        }
-
-        // SAFETY: `inner` is pinned when `queue` is.
-        let pinned = unsafe { queue.as_mut().map_unchecked_mut(|s| &mut s.inner) };
-        match pipe_type {
-            PipeType::Vertex => kernel::mutex_init!(pinned, "WorkQueue::inner (Vertex)"),
-            PipeType::Fragment => kernel::mutex_init!(pinned, "WorkQueue::inner (Fragment)"),
-            PipeType::Compute => kernel::mutex_init!(pinned, "WorkQueue::inner (Compute)"),
-        }
-
-        Ok(queue.into())
+            inner: Mutex::new(inner),
+        })
     }
 
     /// Returns the QueueInfo pointer for this workqueue, as a weak pointer.
@@ -230,27 +500,40 @@ impl WorkQueue::ver {
         self.info_pointer
     }
 
-    /// Start a new batch of work on this queue.
-    pub(crate) fn begin_batch(
-        this: &Arc<WorkQueue::ver>,
-        vm_slot: u32,
-    ) -> Result<BatchBuilder::ver<'_>> {
-        let mut inner = this.inner.lock();
+    pub(crate) fn new_job(self: &Arc<Self>) -> Result<Job::ver> {
+        let mut inner = self.inner.lock();
 
         if inner.event.is_none() {
-            let event = inner.event_manager.get(inner.last_token, this.clone())?;
+            let event = inner.event_manager.get(inner.last_token, self.clone())?;
             let cur = event.current();
             inner.last_token = Some(event.token());
             inner.event = Some((event, cur));
         }
 
-        Ok(BatchBuilder::ver {
-            queue: this,
+        inner.pending_jobs += 1;
+
+        let ev = &inner.event.as_ref().unwrap().0;
+
+        Ok(Job::ver {
+            wq: self.clone(),
+            wq_size: inner.size,
+            stamp_pointer: ev.stamp_pointer(),
+            fw_stamp_pointer: ev.fw_stamp_pointer(),
+            start_value: ev.current(),
+            cur_value: ev.current(),
+            pending: Vec::new(),
+            event_count: 0,
+            committed: false,
+            submitted: false,
+            start_seq: inner.commit_seq,
             wptr: inner.wptr,
-            inner,
-            commands: 0,
-            vm_slot,
+            cmd_wptr: inner.wptr,
         })
+    }
+
+    /// Return the number of free entries in the workqueue
+    pub(crate) fn free_space(&self) -> usize {
+        self.inner.lock().free_space()
     }
 }
 
@@ -258,7 +541,7 @@ impl WorkQueue::ver {
 /// version-specificity into the event module.
 pub(crate) trait WorkQueue {
     fn signal(&self) -> bool;
-    fn mark_error(&self, value: event::EventValue, error: BatchError);
+    fn mark_error(&self, value: event::EventValue, error: WorkError);
 }
 
 #[versions(AGX)]
@@ -285,63 +568,81 @@ impl WorkQueue for WorkQueue::ver {
         );
 
         let mut completed_commands: usize = 0;
-        let mut batches: usize = 0;
 
-        for batch in inner.batches.iter() {
-            if batch.value <= cur_value {
+        for cmd in inner.pending.iter() {
+            if cmd.value() <= cur_value {
                 mod_pr_debug!(
-                    "WorkQueue({:?}): Batch at value {:#x?} complete",
+                    "WorkQueue({:?}): Command at value {:#x?} complete",
                     inner.pipe_type,
-                    batch.value
+                    cmd.value()
                 );
-                completed_commands += batch.commands;
-                batches += 1;
+                completed_commands += 1;
             } else {
                 break;
             }
         }
-        mod_pr_debug!(
-            "WorkQueue({:?}): Completed {} batches",
-            inner.pipe_type,
-            batches
-        );
+
+        if completed_commands == 0 {
+            return inner.pending.is_empty();
+        }
 
         let mut completed = Vec::new();
-        for i in inner.batches.drain(..batches) {
-            if completed.try_push(i).is_err() {
-                pr_err!("Failed to signal completions");
-                break;
+
+        if completed.try_reserve(completed_commands).is_err() {
+            pr_crit!(
+                "WorkQueue({:?}): Failed to allocated space for {} completed commands",
+                inner.pipe_type,
+                completed_commands
+            );
+        }
+
+        let last_wptr = 0;
+
+        let pipe_type = inner.pipe_type;
+
+        for cmd in inner.pending.drain(..completed_commands) {
+            if completed.try_push(cmd).is_err() {
+                pr_crit!(
+                    "WorkQueue({:?}): Failed to signal a completed command",
+                    pipe_type,
+                );
             }
         }
+
+        mod_pr_debug!(
+            "WorkQueue({:?}): Completed {} commands",
+            inner.pipe_type,
+            completed_commands
+        );
+
         if let Some(i) = completed.last() {
             inner
                 .info
                 .state
-                .with(|raw, _inner| raw.cpu_freeptr.store(i.wptr, Ordering::Release));
+                .with(|raw, _inner| raw.cpu_freeptr.store(i.wptr(), Ordering::Release));
         }
 
-        inner.pending.drain(..completed_commands);
-        self.cond.notify_all();
-        let empty = inner.batches.is_empty();
-        if empty {
+        let empty = inner.pending.is_empty();
+        if empty && inner.pending_jobs == 0 {
             inner.event = None;
         }
+
         core::mem::drop(inner);
 
-        for batch in completed {
-            // TODO: Properly abstract this.
-            unsafe { bindings::complete_all(batch.completion.get()) };
+        for cmd in completed {
+            cmd.complete();
         }
+
         empty
     }
 
     /// Mark this queue's work up to a certain stamp value as having failed.
-    fn mark_error(&self, value: event::EventValue, error: BatchError) {
+    fn mark_error(&self, value: event::EventValue, error: WorkError) {
         // If anything is marked completed, we can consider it successful
         // at this point, even if we didn't get the signal event yet.
         self.signal();
 
-        let inner = self.inner.lock();
+        let mut inner = self.inner.lock();
 
         if inner.event.is_none() {
             pr_err!("WorkQueue: signal_fault() called but no event?");
@@ -355,158 +656,10 @@ impl WorkQueue for WorkQueue::ver {
             value
         );
 
-        for batch in inner.batches.iter() {
-            if batch.value <= value {
-                mod_pr_debug!(
-                    "WorkQueue({:?}): Batch at value {:#x?} failed ({} commands)",
-                    inner.pipe_type,
-                    batch.value,
-                    batch.commands,
-                );
-                *(batch.error.lock()) = Some(match error {
-                    BatchError::Fault(info) if info.vm_slot != batch.vm_slot => BatchError::Killed,
-                    err => err,
-                });
-            } else {
+        for cmd in inner.pending.iter_mut() {
+            if !cmd.mark_error(value, error) {
                 break;
             }
-        }
-    }
-}
-
-#[versions(AGX)]
-impl<'a> BatchBuilder::ver<'a> {
-    /// Add a command to a work batch.
-    pub(crate) fn add<T: Command>(&mut self, command: Box<GpuObject<T>>) -> Result {
-        let inner = &mut self.inner;
-
-        let next_wptr = (self.wptr + 1) % inner.size;
-        if inner.doneptr() == next_wptr {
-            pr_err!("Work queue ring buffer is full! Waiting...");
-            while inner.doneptr() == next_wptr {
-                if self.queue.cond.wait(inner) {
-                    return Err(ERESTARTSYS);
-                }
-            }
-        }
-        inner.pending.try_reserve(1)?;
-
-        inner.info.ring[self.wptr as usize] = command.gpu_va().get();
-
-        self.wptr = next_wptr;
-
-        // Cannot fail, since we did a try_reserve(1) above
-        inner
-            .pending
-            .try_push(command)
-            .expect("try_push() failed after try_reserve(1)");
-        self.commands += 1;
-        Ok(())
-    }
-
-    /// Commit the pending commands and submit them to the GPU, returning a Batch object. This
-    /// builder can then be reused to submit more commands.
-    ///
-    /// Note that the GPU must still be notified separately to actually begin work execution on any
-    /// given queue by using GpuManager::submit_batch().
-    pub(crate) fn commit(&mut self) -> Result<Arc<Batch>> {
-        let inner = &mut self.inner;
-        inner.batches.try_reserve(1)?;
-
-        let event = inner.event.as_mut().expect("BatchBuilder lost its event");
-
-        if self.commands == 0 {
-            return Err(EINVAL);
-        }
-
-        event.1.increment();
-        let event_value = event.1;
-
-        inner
-            .info
-            .state
-            .with(|raw, _inner| raw.cpu_wptr.store(self.wptr, Ordering::Release));
-
-        inner.wptr = self.wptr;
-        let batch = Arc::try_new(Batch {
-            value: event_value,
-            commands: self.commands,
-            completion: Opaque::uninit(),
-            wptr: self.wptr,
-            error: smutex::Mutex::new(None),
-            vm_slot: self.vm_slot,
-        })?;
-        unsafe { bindings::init_completion(batch.completion.get()) };
-        inner.batches.try_push(batch.clone())?;
-        self.commands = 0;
-        Ok(batch)
-    }
-
-    /// Submit a work execution request for the newest committed batch to a PipeChannel.
-    ///
-    /// All pending work must have been committed before calling this.
-    pub(crate) fn submit(mut self, channel: &mut channel::PipeChannel::ver) -> Result {
-        if self.commands != 0 {
-            return Err(EINVAL);
-        }
-
-        let inner = &mut self.inner;
-        let event = inner.event.as_ref().expect("BatchBuilder lost its event");
-        let msg = fw::channels::RunWorkQueueMsg::ver {
-            pipe_type: inner.pipe_type,
-            work_queue: Some(inner.info.weak_pointer()),
-            wptr: inner.wptr,
-            event_slot: event.0.slot(),
-            is_new: inner.new,
-            __pad: Default::default(),
-        };
-        channel.send(&msg);
-        inner.new = false;
-        Ok(())
-    }
-
-    /// Return the Event associated with this in-progress batch.
-    pub(crate) fn event(&self) -> &event::Event {
-        let event = self
-            .inner
-            .event
-            .as_ref()
-            .expect("BatchBuilder lost its event");
-        &(event.0)
-    }
-
-    /// Returns the current base event value associated with this in-progress batch.
-    ///
-    /// New work should increment this and use it as the completion value.
-    pub(crate) fn event_value(&self) -> event::EventValue {
-        let event = self
-            .inner
-            .event
-            .as_ref()
-            .expect("BatchBuilder lost its event");
-        event.1
-    }
-
-    /// Returns the pipe type of this queue.
-    pub(crate) fn pipe_type(&self) -> PipeType {
-        self.inner.pipe_type
-    }
-
-    /// Returns the priority of this queue.
-    pub(crate) fn priority(&self) -> u32 {
-        self.inner.priority
-    }
-}
-
-#[versions(AGX)]
-impl<'a> Drop for BatchBuilder::ver<'a> {
-    fn drop(&mut self) {
-        if self.commands != 0 {
-            pr_warn!("BatchBuilder: rolling back {} commands!", self.commands);
-
-            let inner = &mut self.inner;
-            let new_len = inner.pending.len() - self.commands;
-            inner.pending.truncate(new_len);
         }
     }
 }

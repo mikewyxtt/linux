@@ -47,8 +47,9 @@ struct drm_asahi_params_global {
 	__u64 vm_shader_start;
 	__u64 vm_shader_end;
 
+	__u32 max_syncs_per_submission;
 	__u32 max_commands_per_submission;
-	__u32 max_pending_commands;
+	__u32 max_commands_in_flight;
 	__u32 max_attachments;
 };
 
@@ -273,15 +274,20 @@ struct drm_asahi_submit {
 	/** @in_sync_count: Number of sync objects to wait on before starting this job. */
 	__u32 in_sync_count;
 
-	/** @in_syncs: An optional array of drm_asahi_sync to wait on before starting this job. */
-	__u64 in_syncs;
-
 	/** @in_sync_count: Number of sync objects to signal upon completion of this job. */
 	__u32 out_sync_count;
+
+	/** @pad: Number of commands to be submitted */
+	__u32 command_count;
+
+	/** @in_syncs: An optional array of drm_asahi_sync to wait on before starting this job. */
+	__u64 in_syncs;
 
 	/** @in_syncs: An optional array of drm_asahi_sync objects to signal upon completion. */
 	__u64 out_syncs;
 
+	/** @commands: Pointer to the drm_asahi_command array of commands to submit. */
+	__u64 commands;
 };
 
 #define ASAHI_ATTACHMENT_C    0
