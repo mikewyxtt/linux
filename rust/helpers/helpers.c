@@ -25,6 +25,7 @@
 #include "page.c"
 #include "platform_device.c"
 #include "refcount.c"
+#include "scatterlist.c"
 #include "signal.c"
 #include "siphash.c"
 #include "slab.c"
