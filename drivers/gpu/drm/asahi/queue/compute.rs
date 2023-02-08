@@ -19,6 +19,8 @@ use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
 use kernel::bindings;
+use kernel::dma_fence::RawDmaFence;
+use kernel::drm::sched::Job;
 use kernel::io_buffer::IoBufferReader;
 use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
@@ -29,7 +31,12 @@ const DEBUG_CLASS: DebugFlags = DebugFlags::Compute;
 #[versions(AGX)]
 impl super::Queue::ver {
     /// Submit work to a compute queue.
-    fn submit_compute(&self, cmd: &bindings::drm_asahi_command, id: u64) -> Result {
+    pub(super) fn submit_compute(
+        &self,
+        job: &mut Job<super::QueueJob::ver>,
+        cmd: &bindings::drm_asahi_command,
+        id: u64,
+    ) -> Result {
         if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE {
             return Err(EINVAL);
         }
@@ -39,11 +46,6 @@ impl super::Queue::ver {
             Some(gpu) => gpu,
             None => panic!("GpuManager mismatched with ComputeQueue!"),
         };
-
-        // Wake up the firmware early while we get everything ready.
-        let _op_guard = gpu.start_op()?;
-
-        let notifier = &self.notifier;
 
         let mut alloc = gpu.alloc();
         let kalloc = &mut *alloc;
@@ -73,7 +75,7 @@ impl super::Queue::ver {
         // but it's unclear *which* slot...
         let slot_client_seq: u8 = (self.id & 0xff) as u8;
 
-        let vm_bind = gpu.bind_vm(&self.vm)?;
+        let vm_bind = job.vm_bind.clone();
 
         mod_dev_dbg!(
             self.dev,
@@ -82,7 +84,11 @@ impl super::Queue::ver {
             vm_bind.slot()
         );
 
-        let mut batches = workqueue::WorkQueue::ver::begin_batch(&self.wq, vm_bind.slot())?;
+        let notifier = job.notifier.clone();
+
+        let fence = job.fence.clone();
+        let comp_job = job.get_comp()?;
+        let ev_comp = comp_job.event_info();
 
         // TODO: Is this the same on all GPUs? Is this really for preemption?
         let preempt_size = 0x7fa0;
@@ -98,15 +104,13 @@ impl super::Queue::ver {
             seq_buf[i] = (i + 1) as u64;
         }
 
-        let next_stamp = batches.event_value().next();
-
         mod_dev_dbg!(
             self.dev,
             "[Submission {}] Event #{} {:#x?} -> {:#x?}\n",
             id,
-            batches.event().slot(),
-            batches.event_value(),
-            next_stamp
+            ev_comp.slot,
+            ev_comp.cur_value,
+            ev_comp.next_value,
         );
 
         let timestamps = Arc::try_new(kalloc.shared.new_default::<fw::job::JobTimestamps>()?)?;
@@ -117,15 +121,7 @@ impl super::Queue::ver {
 
         mod_dev_dbg!(self.dev, "[Submission {}] UUID = {:#x?}\n", id, uuid);
 
-        let cmd_seq = self.command_count.fetch_add(1, Ordering::Relaxed);
-
-        mod_dev_dbg!(
-            self.dev,
-            "[Submission {}] Command seq = {:#x?}\n",
-            id,
-            cmd_seq
-        );
-
+        // TODO: check
         #[ver(V >= V13_0B4)]
         let count = self.counter.fetch_add(1, Ordering::Relaxed);
 
@@ -141,12 +137,11 @@ impl super::Queue::ver {
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     job_params1: inner_weak_ptr!(ptr, job_params1),
                     stats,
-                    work_queue: self.wq.info_pointer(),
+                    work_queue: ev_comp.info_ptr,
                     vm_slot: vm_bind.slot(),
                     unk_28: 0x1,
-                    event_generation: self.id as u32,
-                    cmd_seq,
-                    unk_34: 0x0,
+                    event_generation: id as u32,
+                    cmd_seq: U64(ev_comp.cmd_seq),
                     unk_38: 0x0,
                     job_params2: inner_weak_ptr!(ptr, job_params2),
                     unk_44: 0x0,
@@ -170,7 +165,7 @@ impl super::Queue::ver {
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
                     start_ts: inner_weak_ptr!(ptr, start_ts),
                     update_ts: inner_weak_ptr!(ptr, start_ts),
-                    work_queue: self.wq.info_pointer(),
+                    work_queue: ev_comp.info_ptr,
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
                     unk_ts: inner_weak_ptr!(ptr, unk_ts),
@@ -189,7 +184,7 @@ impl super::Queue::ver {
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
                     start_ts: inner_weak_ptr!(ptr, start_ts),
                     update_ts: inner_weak_ptr!(ptr, end_ts),
-                    work_queue: self.wq.info_pointer(),
+                    work_queue: ev_comp.info_ptr,
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
                     unk_ts: inner_weak_ptr!(ptr, unk_ts),
@@ -202,15 +197,15 @@ impl super::Queue::ver {
                 builder.add(microseq::FinalizeCompute::ver {
                     header: microseq::op::FinalizeCompute::HEADER,
                     stats,
-                    work_queue: self.wq.info_pointer(),
+                    work_queue: ev_comp.info_ptr,
                     vm_slot: vm_bind.slot(),
                     #[ver(V < V13_0B4)]
                     unk_18: 0,
                     job_params2: inner_weak_ptr!(ptr, job_params2),
                     unk_24: 0,
                     uuid,
-                    fw_stamp: batches.event().fw_stamp_pointer(),
-                    stamp_value: next_stamp,
+                    fw_stamp: ev_comp.fw_stamp_pointer,
+                    stamp_value: ev_comp.next_value,
                     unk_38: 0,
                     unk_3c: 0,
                     unk_40: 0,
@@ -300,14 +295,14 @@ impl super::Queue::ver {
                         },
                         meta: fw::job::raw::JobMeta {
                             unk_4: 0,
-                            stamp: batches.event().stamp_pointer(),
-                            fw_stamp: batches.event().fw_stamp_pointer(),
-                            stamp_value: next_stamp,
-                            stamp_slot: batches.event().slot(),
+                            stamp: ev_comp.stamp_pointer,
+                            fw_stamp: ev_comp.fw_stamp_pointer,
+                            stamp_value: ev_comp.next_value,
+                            stamp_slot: ev_comp.slot,
                             evctl_index: 0, // fixed
                             flush_stamps: 0,
                             uuid: uuid,
-                            queue_cmd_count: 0, // TODO: fix
+                            cmd_seq: ev_comp.cmd_seq as u32,
                         },
                         cur_ts: U64(0),
                         start_ts: Some(inner_ptr!(inner.timestamps.gpu_pointer(), start)),
@@ -335,62 +330,19 @@ impl super::Queue::ver {
 
         core::mem::drop(alloc);
 
+        comp_job.add_cb(comp, vm_bind.slot(), move |cmd, error| {
+            if let Some(err) = error {
+                fence.set_error(err.into())
+            }
+            fence.command_complete();
+        })?;
+
         notifier.threshold.with(|raw, _inner| {
             raw.increment();
         });
-        batches.add(Box::try_new(comp)?)?;
-        let batch = batches.commit()?;
 
-        mod_dev_dbg!(self.dev, "[Submission {}] Submit compute!\n", id);
-        gpu.submit_batch(batches)?;
+        comp_job.next_seq();
 
-        mod_dev_dbg!(
-            self.dev,
-            "[Submission {}] Waiting for compute batch...\n",
-            id
-        );
-
-        let mut ret = Ok(());
-
-        match batch.wait() {
-            Ok(()) => {
-                mod_dev_dbg!(self.dev, "[Submission {}] Compute batch completed!\n", id);
-            }
-            Err(err) => {
-                dev_err!(
-                    self.dev,
-                    "[Submission {}] Compute batch failed: {:?}\n",
-                    id,
-                    err
-                );
-                ret = Err(err.into());
-            }
-        }
-
-        let (ts_start, ts_end) = timestamps.with(|raw, _inner| {
-            (
-                raw.start.load(Ordering::Relaxed),
-                raw.end.load(Ordering::Relaxed),
-            )
-        });
-
-        mod_dev_dbg!(
-            self.dev,
-            "[Submission {}] Timestamps: {} {} (delta: {})\n",
-            id,
-            ts_start,
-            ts_end,
-            ts_end.wrapping_sub(ts_start)
-        );
-
-        if debug_enabled(debug::DebugFlags::WaitForPowerOff) {
-            mod_dev_dbg!(self.dev, "[Submission {}] Waiting for GPU power-off\n", id);
-            if gpu.wait_for_poweroff(100).is_err() {
-                dev_warn!(self.dev, "[Submission {}] GPU failed to power off\n", id);
-            }
-            mod_dev_dbg!(self.dev, "[Submission {}] GPU powered off\n", id);
-        }
-
-        ret
+        Ok(())
     }
 }

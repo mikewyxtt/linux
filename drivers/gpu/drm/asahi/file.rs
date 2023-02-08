@@ -11,6 +11,7 @@ use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::{alloc, buffer, driver, gem, mmu, queue};
 use core::mem::MaybeUninit;
+use kernel::dma_fence::RawDmaFence;
 use kernel::drm::gem::BaseObject;
 use kernel::io_buffer::{IoBufferReader, IoBufferWriter};
 use kernel::prelude::*;
@@ -35,8 +36,8 @@ struct Vm {
 /// Sync object from userspace.
 pub(crate) struct SyncItem {
     pub(crate) syncobj: drm::syncobj::SyncObj,
-    pub(crate) fence: Option<dma_fence::DmaFence>,
-    pub(crate) chain_fence: Option<dma_fence::DmaFenceChain>,
+    pub(crate) fence: Option<dma_fence::Fence>,
+    pub(crate) chain_fence: Option<dma_fence::FenceChain>,
     pub(crate) timeline_value: u64,
 }
 
@@ -81,7 +82,7 @@ impl SyncItem {
                     fence,
                     syncobj,
                     chain_fence: if out {
-                        Some(dma_fence::DmaFenceChain::new()?)
+                        Some(dma_fence::FenceChain::new()?)
                     } else {
                         None
                     },

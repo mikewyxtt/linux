@@ -20,6 +20,8 @@ use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
 use kernel::bindings;
+use kernel::dma_fence::RawDmaFence;
+use kernel::drm::sched::Job;
 use kernel::io_buffer::IoBufferReader;
 use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
@@ -157,9 +159,8 @@ impl super::Queue::ver {
 
     /// Submit work to a render queue.
     pub(super) fn submit_render(
-        &mut self,
-        gpu: &gpu::GpuManager::ver,
-        qj: &mut super::QueueJob::ver,
+        &self,
+        job: &mut Job<super::QueueJob::ver>,
         cmd: &bindings::drm_asahi_command,
         id: u64,
     ) -> Result {
@@ -168,8 +169,10 @@ impl super::Queue::ver {
         }
 
         let dev = self.dev.data();
-
-        let notifier = &self.notifier;
+        let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
+            Some(gpu) => gpu,
+            None => panic!("GpuManager mismatched with Queue!"),
+        };
 
         let nclusters = gpu.get_dyncfg().id.num_clusters;
 
@@ -240,7 +243,11 @@ impl super::Queue::ver {
 
         let tile_info = Self::get_tiling_params(&cmdbuf, if clustering { nclusters } else { 1 })?;
 
-        let buffer = self.buffer.as_mut().ok_or(EINVAL)?;
+        let buffer = self.buffer.as_ref().ok_or(EINVAL)?.lock();
+
+        let scene = Arc::try_new(buffer.new_scene(kalloc, &tile_info)?)?;
+
+        let notifier = job.notifier.clone();
 
         let tvb_autogrown = buffer.auto_grow()?;
         if tvb_autogrown {
@@ -269,37 +276,31 @@ impl super::Queue::ver {
             );
         }
 
-        let vm_bind = gpu.bind_vm(&self.vm)?;
+        let vm_bind = job.vm_bind.clone();
 
         mod_dev_dbg!(
             self.dev,
             "[Submission {}] VM slot = {}\n",
             id,
-            qj.vm_bind.slot()
+            vm_bind.slot()
         );
 
-        let sj_vtx = qj.sj_vtx.as_mut().ok_or(EINVAL);
-        let sj_frag = qj.sj_frag.as_mut().ok_or(EINVAL);
+        let ev_vtx = job.get_vtx()?.event_info();
+        let ev_frag = job.get_frag()?.event_info();
 
-        let scene = Arc::try_new(buffer.new_scene(kalloc, &tile_info)?)?;
-
-        let next_vtx = qj.batches_vtx.event_value().next();
-        let next_frag = batches_frag.event_value().next();
         mod_dev_dbg!(
             self.dev,
-            "[Submission {}] Vert event #{} {:#x?} -> {:#x?}\n",
+            "[Submission {}] Vert event #{} -> {:#x?}\n",
             id,
-            batches_vtx.event().slot(),
-            batches_vtx.event_value(),
-            next_vtx
+            ev_vtx.slot,
+            ev_vtx.next_value,
         );
         mod_dev_dbg!(
             self.dev,
-            "[Submission {}] Frag event #{} {:#x?} -> {:#x?}\n",
+            "[Submission {}] Frag event #{} -> {:#x?}\n",
             id,
-            batches_frag.event().slot(),
-            batches_frag.event_value(),
-            next_frag
+            ev_frag.slot,
+            ev_frag.next_value,
         );
 
         let uuid_3d = cmdbuf.cmd_3d_id;
@@ -318,6 +319,9 @@ impl super::Queue::ver {
             uuid_3d
         );
 
+        let fence = job.fence.clone();
+        let frag_job = job.get_frag()?;
+
         let barrier: GpuObject<fw::workqueue::Barrier> = kalloc.private.new_inplace(
             Default::default(),
             |_inner, ptr: &mut MaybeUninit<fw::workqueue::raw::Barrier>| {
@@ -325,10 +329,10 @@ impl super::Queue::ver {
                     ptr,
                     fw::workqueue::raw::Barrier {
                         tag: fw::workqueue::CommandType::Barrier,
-                        wait_stamp: batches_vtx.event().fw_stamp_pointer(),
-                        wait_value: next_vtx,
-                        wait_slot: batches_vtx.event().slot(),
-                        stamp_self: next_frag,
+                        wait_stamp: ev_vtx.fw_stamp_pointer,
+                        wait_value: ev_vtx.next_value,
+                        wait_slot: ev_vtx.slot,
+                        stamp_self: ev_frag.next_value,
                         uuid: uuid_3d,
                         unk: 0,
                     }
@@ -336,7 +340,7 @@ impl super::Queue::ver {
             },
         )?;
 
-        batches_frag.add(Box::try_new(barrier)?)?;
+        frag_job.add(barrier, vm_bind.slot())?;
 
         let timestamps = Arc::try_new(kalloc.shared.new_default::<fw::job::JobTimestamps>()?)?;
 
@@ -364,6 +368,7 @@ impl super::Queue::ver {
             _ => return Err(EINVAL),
         };
 
+        // TODO: check
         #[ver(V >= V13_0B4)]
         let count_frag = self.counter.fetch_add(2, Ordering::Relaxed);
         #[ver(V >= V13_0B4)]
@@ -388,14 +393,14 @@ impl super::Queue::ver {
                     busy_flag: inner_weak_ptr!(ptr, busy_flag),
                     tvb_overflow_count: inner_weak_ptr!(ptr, tvb_overflow_count),
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
-                    work_queue: self.wq_frag.info_pointer(),
+                    work_queue: ev_frag.info_ptr,
                     work_item: ptr,
-                    vm_slot: qj.vm_bind.slot(),
+                    vm_slot: vm_bind.slot(),
                     unk_50: 0x1, // fixed
-                    event_generation: self.id as u32,
+                    event_generation: id as u32,
                     buffer_slot: scene.slot(),
                     unk_5c: 0,
-                    queue_cmd_count: U64(batches_frag.event_value().counter() as u64), // TODO: fix
+                    cmd_seq: U64(ev_frag.cmd_seq),
                     unk_68: 0,
                     unk_758_flag: inner_weak_ptr!(ptr, unk_758_flag),
                     unk_job_buf: inner_weak_ptr!(ptr, unk_buf_0),
@@ -411,7 +416,7 @@ impl super::Queue::ver {
                     #[ver(V >= V13_0B4)]
                     counter: U64(count_frag),
                     #[ver(V >= V13_0B4)]
-                    notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
+                    notifier_buf: inner_weak_ptr!(job.notifier.weak_pointer(), state.unk_buf),
                 })?;
 
                 /*
@@ -420,7 +425,7 @@ impl super::Queue::ver {
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
                     start_ts: inner_weak_ptr!(ptr, start_ts),
                     update_ts: inner_weak_ptr!(ptr, start_ts),
-                    work_queue: self.wq_frag.info_pointer(),
+                    work_queue: ev_frag.info_ptr,
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
                     unk_ts: inner_weak_ptr!(ptr, unk_ts),
@@ -439,7 +444,7 @@ impl super::Queue::ver {
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
                     start_ts: inner_weak_ptr!(ptr, start_ts),
                     update_ts: inner_weak_ptr!(ptr, end_ts),
-                    work_queue: self.wq_frag.info_pointer(),
+                    work_queue: ev_frag.info_ptr,
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
                     unk_ts: inner_weak_ptr!(ptr, unk_ts),
@@ -453,8 +458,8 @@ impl super::Queue::ver {
                     header: microseq::op::FinalizeFragment::HEADER,
                     uuid: uuid_3d,
                     unk_8: 0,
-                    fw_stamp: batches_frag.event().fw_stamp_pointer(),
-                    stamp_value: next_frag,
+                    fw_stamp: ev_frag.fw_stamp_pointer,
+                    stamp_value: ev_frag.next_value,
                     unk_18: 0,
                     scene: scene.weak_pointer(),
                     buffer: scene.weak_buffer_pointer(),
@@ -462,9 +467,9 @@ impl super::Queue::ver {
                     stats,
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     busy_flag: inner_weak_ptr!(ptr, busy_flag),
-                    work_queue: self.wq_frag.info_pointer(),
+                    work_queue: ev_frag.info_ptr,
                     work_item: ptr,
-                    vm_slot: qj.vm_bind.slot(),
+                    vm_slot: vm_bind.slot(),
                     unk_60: 0,
                     unk_758_flag: inner_weak_ptr!(ptr, unk_758_flag),
                     unk_6c: U64(0),
@@ -488,7 +493,7 @@ impl super::Queue::ver {
                     notifier: notifier.clone(),
                     scene: scene.clone(),
                     micro_seq: builder.build(&mut kalloc.private)?,
-                    vm_bind: qj.vm_bind.clone(),
+                    vm_bind: vm_bind.clone(),
                     aux_fb: self.ualloc.lock().array_empty(0x8000)?,
                     timestamps: timestamps.clone(),
                 })?)
@@ -509,7 +514,7 @@ impl super::Queue::ver {
                         tag: fw::workqueue::CommandType::RunFragment,
                         #[ver(V >= V13_0B4)]
                         counter: U64(count_frag),
-                        vm_slot: qj.vm_bind.slot(),
+                        vm_slot: vm_bind.slot(),
                         unk_8: 0,
                         microsequence: inner.micro_seq.gpu_pointer(),
                         microsequence_size: inner.micro_seq.len() as u32,
@@ -689,14 +694,14 @@ impl super::Queue::ver {
                         unk_pointee: 0,
                         meta: fw::job::raw::JobMeta {
                             unk_4: 0,
-                            stamp: batches_frag.event().stamp_pointer(),
-                            fw_stamp: batches_frag.event().fw_stamp_pointer(),
-                            stamp_value: next_frag,
-                            stamp_slot: batches_frag.event().slot(),
+                            stamp: ev_frag.stamp_pointer,
+                            fw_stamp: ev_frag.fw_stamp_pointer,
+                            stamp_value: ev_frag.next_value,
+                            stamp_slot: ev_frag.slot,
                             evctl_index: 0, // fixed
                             flush_stamps: 0,
                             uuid: uuid_3d,
-                            queue_cmd_count: batches_frag.event_value().counter(), // TODO: fix
+                            cmd_seq: ev_frag.cmd_seq as u32,
                         },
                         unk_after_meta: unk1.into(),
                         unk_buf_0: U64(0),
@@ -723,6 +728,16 @@ impl super::Queue::ver {
             },
         )?;
 
+        frag_job.add_cb(frag, vm_bind.slot(), move |cmd, error| {
+            if let Some(err) = error {
+                fence.set_error(err.into())
+            }
+            fence.command_complete();
+        })?;
+
+        let fence = job.fence.clone();
+        let vtx_job = job.get_vtx()?;
+
         if scene.rebind() || tvb_grown || tvb_autogrown {
             let bind_buffer = kalloc.private.new_inplace(
                 fw::buffer::InitBuffer::ver {
@@ -733,18 +748,18 @@ impl super::Queue::ver {
                         ptr,
                         fw::buffer::raw::InitBuffer::ver {
                             tag: fw::workqueue::CommandType::InitBuffer,
-                            vm_slot: qj.vm_bind.slot(),
+                            vm_slot: vm_bind.slot(),
                             buffer_slot: inner.scene.slot(),
                             unk_c: 0,
-                            block_count: self.buffer.block_count(),
+                            block_count: buffer.block_count(),
                             buffer: inner.scene.buffer_pointer(),
-                            stamp_value: next_vtx,
+                            stamp_value: ev_vtx.next_value,
                         }
                     ))
                 },
             )?;
 
-            batches_vtx.add(Box::try_new(bind_buffer)?)?;
+            vtx_job.add(bind_buffer, vm_bind.slot())?;
         }
 
         let vtx = GpuObject::new_prealloc(
@@ -764,13 +779,13 @@ impl super::Queue::ver {
                     buffer: scene.weak_buffer_pointer(),
                     scene: scene.weak_pointer(),
                     stats,
-                    work_queue: self.wq_vtx.info_pointer(),
-                    vm_slot: qj.vm_bind.slot(),
+                    work_queue: ev_vtx.info_ptr,
+                    vm_slot: vm_bind.slot(),
                     unk_38: 1, // fixed
-                    event_generation: self.id as u32,
+                    event_generation: id as u32,
                     buffer_slot: scene.slot(),
                     unk_44: 0,
-                    queue_cmd_count: U64(batches_vtx.event_value().counter() as u64), // TODO: fix
+                    cmd_seq: U64(ev_vtx.cmd_seq),
                     unk_50: 0,
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     unk_job_buf: inner_weak_ptr!(ptr, unk_buf_0),
@@ -787,7 +802,7 @@ impl super::Queue::ver {
                     #[ver(V >= V13_0B4)]
                     counter: U64(count_vtx),
                     #[ver(V >= V13_0B4)]
-                    notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
+                    notifier_buf: inner_weak_ptr!(job.notifier.weak_pointer(), state.unk_buf),
                     unk_178: 0x0, // padding?
                 })?;
 
@@ -797,7 +812,7 @@ impl super::Queue::ver {
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
                     start_ts: inner_weak_ptr!(ptr, start_ts),
                     update_ts: inner_weak_ptr!(ptr, start_ts),
-                    work_queue: self.wq_vtx.info_pointer(),
+                    work_queue: ev_vtx.info_ptr,
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
                     unk_ts: inner_weak_ptr!(ptr, unk_ts),
@@ -816,7 +831,7 @@ impl super::Queue::ver {
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
                     start_ts: inner_weak_ptr!(ptr, start_ts),
                     update_ts: inner_weak_ptr!(ptr, end_ts),
-                    work_queue: self.wq_vtx.info_pointer(),
+                    work_queue: ev_vtx.info_ptr,
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
                     unk_ts: inner_weak_ptr!(ptr, unk_ts),
@@ -831,14 +846,14 @@ impl super::Queue::ver {
                     scene: scene.weak_pointer(),
                     buffer: scene.weak_buffer_pointer(),
                     stats,
-                    work_queue: self.wq_vtx.info_pointer(),
-                    vm_slot: qj.vm_bind.slot(),
+                    work_queue: ev_vtx.info_ptr,
+                    vm_slot: vm_bind.slot(),
                     unk_28: 0x0, // fixed
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     unk_34: 0x0, // fixed
                     uuid: uuid_ta,
-                    fw_stamp: batches_vtx.event().fw_stamp_pointer(),
-                    stamp_value: next_vtx,
+                    fw_stamp: ev_vtx.fw_stamp_pointer,
+                    stamp_value: ev_vtx.next_value,
                     unk_48: U64(0x0), // fixed
                     unk_50: 0x0,      // fixed
                     unk_54: 0x0,      // fixed
@@ -859,10 +874,10 @@ impl super::Queue::ver {
                 })?;
 
                 Ok(box_in_place!(fw::vertex::RunVertex::ver {
-                    notifier: notifier.clone(),
+                    notifier: notifier,
                     scene: scene.clone(),
                     micro_seq: builder.build(&mut kalloc.private)?,
-                    vm_bind: qj.vm_bind.clone(),
+                    vm_bind: vm_bind.clone(),
                     timestamps: timestamps,
                 })?)
             },
@@ -875,7 +890,7 @@ impl super::Queue::ver {
                         tag: fw::workqueue::CommandType::RunVertex,
                         #[ver(V >= V13_0B4)]
                         counter: U64(count_vtx),
-                        vm_slot: qj.vm_bind.slot(),
+                        vm_slot: vm_bind.slot(),
                         unk_8: 0,
                         notifier: inner.notifier.gpu_pointer(),
                         buffer_slot: inner.scene.slot(),
@@ -953,8 +968,8 @@ impl super::Queue::ver {
                         tpc_size: U64(tile_info.tpc_size as u64),
                         microsequence: inner.micro_seq.gpu_pointer(),
                         microsequence_size: inner.micro_seq.len() as u32,
-                        fragment_stamp_slot: batches_frag.event().slot(),
-                        fragment_stamp_value: next_frag,
+                        fragment_stamp_slot: ev_frag.slot,
+                        fragment_stamp_value: ev_frag.next_value,
                         unk_pointee: 0,
                         unk_pad: 0,
                         job_params2: fw::vertex::raw::JobParameters2 {
@@ -991,14 +1006,14 @@ impl super::Queue::ver {
                         unk_56c: 0,
                         meta: fw::job::raw::JobMeta {
                             unk_4: 0,
-                            stamp: batches_vtx.event().stamp_pointer(),
-                            fw_stamp: batches_vtx.event().fw_stamp_pointer(),
-                            stamp_value: next_vtx,
-                            stamp_slot: batches_vtx.event().slot(),
+                            stamp: ev_vtx.stamp_pointer,
+                            fw_stamp: ev_vtx.fw_stamp_pointer,
+                            stamp_value: ev_vtx.next_value,
+                            stamp_slot: ev_vtx.slot,
                             evctl_index: 0, // fixed
                             flush_stamps: 0,
                             uuid: uuid_ta,
-                            queue_cmd_count: batches_vtx.event_value().counter(), // TODO: fix
+                            cmd_seq: ev_vtx.cmd_seq as u32,
                         },
                         unk_after_meta: unk1.into(),
                         unk_buf_0: U64(0),
@@ -1029,78 +1044,24 @@ impl super::Queue::ver {
 
         core::mem::drop(alloc);
 
-        batches_frag.add(Box::try_new(frag)?)?;
-        batches_vtx.add(Box::try_new(vtx)?)?;
+        vtx_job.add_cb(vtx, vm_bind.slot(), move |cmd, error| {
+            if let Some(err) = error {
+                fence.set_error(err.into())
+            }
+            fence.command_complete();
+        })?;
 
-        notifier.threshold.with(|raw, _inner| {
+        job.notifier.threshold.with(|raw, _inner| {
             raw.increment();
             raw.increment();
         });
-        self.buffer.increment();
 
-        // TODO: This can fail and leave the buffer manager with an inconsistent usage count, fix when
-        // we rework the submission stuff.
-        let batch_frag = batches_frag.commit()?;
-        let batch_vtx = batches_vtx.commit()?;
+        // TODO: handle rollbacks, move to job submit?
+        buffer.increment();
 
-        mod_dev_dbg!(self.dev, "[Submission {}] Submit frag!\n", id);
-        gpu.submit_batch(batches_frag)?;
-        mod_dev_dbg!(self.dev, "[Submission {}] Submit vert!\n", id);
-        gpu.submit_batch(batches_vtx)?;
+        job.get_vtx()?.next_seq();
+        job.get_frag()?.next_seq();
 
-        mod_dev_dbg!(
-            self.dev,
-            "[Submission {}] Waiting for vertex batch...\n",
-            id
-        );
-
-        let mut ret = Ok(());
-
-        match batch_vtx.wait() {
-            Ok(()) => {
-                mod_dev_dbg!(self.dev, "[Submission {}] Vertex batch completed!\n", id);
-            }
-            Err(err) => {
-                dev_err!(
-                    self.dev,
-                    "[Submission {}] Vertex batch failed: {:?}\n",
-                    id,
-                    err
-                );
-                ret = Err(err.into());
-            }
-        }
-
-        mod_dev_dbg!(
-            self.dev,
-            "[Submission {}] Waiting for fragment batch...\n",
-            id
-        );
-        match batch_frag.wait() {
-            Ok(()) => {
-                mod_dev_dbg!(self.dev, "[Submission {}] Fragment batch completed!\n", id);
-            }
-            Err(err) => {
-                dev_err!(
-                    self.dev,
-                    "[Submission {}] Fragment batch failed: {:?}\n",
-                    id,
-                    err
-                );
-                if ret.is_ok() || err != workqueue::BatchError::Killed {
-                    ret = Err(err.into());
-                }
-            }
-        }
-
-        if debug_enabled(debug::DebugFlags::WaitForPowerOff) {
-            mod_dev_dbg!(self.dev, "[Submission {}] Waiting for GPU power-off\n", id);
-            if gpu.wait_for_poweroff(100).is_err() {
-                dev_warn!(self.dev, "[Submission {}] GPU failed to power off\n", id);
-            }
-            mod_dev_dbg!(self.dev, "[Submission {}] GPU powered off\n", id);
-        }
-
-        ret
+        Ok(())
     }
 }

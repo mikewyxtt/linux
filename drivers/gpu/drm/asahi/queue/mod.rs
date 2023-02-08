@@ -6,6 +6,7 @@
 //! This module implements the userspace view of submission queues and the logic to map userspace
 //! submissions to firmware queues.
 
+use kernel::dma_fence::*;
 use kernel::io_buffer::IoBufferReader;
 use kernel::prelude::*;
 use kernel::user_ptr::UserSlicePtr;
@@ -27,15 +28,15 @@ use crate::{alloc, buffer, channel, event, file, fw, gem, gpu, microseq, mmu, ob
 use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 
 use core::mem::MaybeUninit;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Queue;
 
 const WQ_SIZE: u32 = file::MAX_COMMANDS_IN_FLIGHT + 128;
 
 mod common;
-// mod compute;
-// mod render;
+mod compute;
+mod render;
 
 /// Trait implemented by all versioned queues.
 pub(crate) trait Queue: Send + Sync {
@@ -98,13 +99,41 @@ pub(crate) struct Queue {
     q_vtx: Option<SubQueue::ver>,
     q_frag: Option<SubQueue::ver>,
     q_comp: Option<SubQueue::ver>,
-    buffer: Option<buffer::Buffer::ver>,
+    buffer: Option<Mutex<buffer::Buffer::ver>>,
     gpu_context: Arc<GpuObject<fw::workqueue::GpuContextData>>,
     notifier_list: Arc<GpuObject<fw::event::NotifierList>>,
-    notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
     id: u64,
+    fence_ctx: FenceContexts,
     #[ver(V >= V13_0B4)]
     counter: u64,
+}
+
+#[versions(AGX)]
+#[derive(Default)]
+pub(crate) struct JobFence {
+    pending: AtomicU64,
+}
+
+#[versions(AGX)]
+impl JobFence::ver {
+    fn command_complete(self: &FenceObject<Self>) {
+        if self.pending.fetch_sub(1, Ordering::Relaxed) == 1 && self.signal().is_err() {
+            pr_err!("Fence signal failed\n");
+        }
+    }
+}
+
+#[versions(AGX)]
+#[vtable]
+impl dma_fence::FenceOps for JobFence::ver {
+    const USE_64BIT_SEQNO: bool = true;
+
+    fn get_driver_name<'a>(self: &'a FenceObject<Self>) -> &'a CStr {
+        c_str!("asahi")
+    }
+    fn get_timeline_name<'a>(self: &'a FenceObject<Self>) -> &'a CStr {
+        c_str!("queue")
+    }
 }
 
 #[versions(AGX)]
@@ -114,7 +143,8 @@ pub(crate) struct QueueJob {
     sj_vtx: Option<SubQueueJob::ver>,
     sj_frag: Option<SubQueueJob::ver>,
     sj_comp: Option<SubQueueJob::ver>,
-
+    fence: UserFence<JobFence::ver>,
+    notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
 }
 
 #[versions(AGX)]
@@ -154,9 +184,51 @@ impl sched::JobImpl for QueueJob::ver {
         true
     }
 
-    fn run(job: &mut sched::Job<Self>) -> Result<Option<dma_fence::DmaFence>> {
+    #[allow(unused_assignments)]
+    fn run(job: &mut sched::Job<Self>) -> Result<Option<dma_fence::Fence>> {
         mod_dev_dbg!(job.dev, "QueueJob: Running Job\n");
-        todo!()
+
+        // First submit all the commands for each queue. This can fail.
+
+        let mut vtx_job = None;
+        let mut vtx_sub = None;
+        if let Some(sj) = job.sj_vtx.as_mut() {
+            vtx_job = sj.job.take();
+            if let Some(job) = vtx_job.as_mut() {
+                vtx_sub = Some(job.submit()?);
+            }
+        }
+
+        let mut frag_job = None;
+        let mut frag_sub = None;
+        if let Some(sj) = job.sj_frag.as_mut() {
+            frag_job = sj.job.take();
+            if let Some(job) = frag_job.as_mut() {
+                frag_sub = Some(job.submit()?);
+            }
+        }
+
+        let mut comp_job = None;
+        let mut comp_sub = None;
+        if let Some(sj) = job.sj_comp.as_mut() {
+            comp_job = sj.job.take();
+            if let Some(job) = comp_job.as_mut() {
+                comp_sub = Some(job.submit()?);
+            }
+        }
+
+        let dev = job.dev.data();
+        let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
+            Some(gpu) => gpu,
+            None => panic!("GpuManager mismatched with JobImpl!"),
+        };
+
+        // Now we fully commit to running the job
+        vtx_sub.map(|a| gpu.run_job(a)).transpose()?;
+        frag_sub.map(|a| gpu.run_job(a)).transpose()?;
+        comp_sub.map(|a| gpu.run_job(a)).transpose()?;
+
+        Ok(Some(Fence::from_fence(&job.fence)))
     }
 
     fn timed_out(job: &mut sched::Job<Self>) -> sched::Status {
@@ -168,6 +240,9 @@ impl sched::JobImpl for QueueJob::ver {
         sched::Status::NoDevice
     }
 }
+
+static QUEUE_NAME: &CStr = c_str!("asahi_fence");
+static QUEUE_CLASS_KEY: kernel::sync::LockClassKey = kernel::sync::LockClassKey::new();
 
 #[versions(AGX)]
 impl Queue::ver {
@@ -202,25 +277,6 @@ impl Queue::ver {
             raw.list_head.next = Some(inner_weak_ptr!(self_ptr, list_head));
         });
 
-        let notifier: Arc<GpuObject<fw::event::Notifier::ver>> =
-            Arc::try_new(alloc.private.new_inplace(
-                fw::event::Notifier::ver {
-                    threshold: alloc.shared.new_default::<fw::event::Threshold>()?,
-                },
-                |inner, ptr: &mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
-                    Ok(place!(
-                        ptr,
-                        fw::event::raw::Notifier::ver {
-                            threshold: inner.threshold.gpu_pointer(),
-                            generation: AtomicU32::new(id as u32),
-                            cur_count: AtomicU32::new(0),
-                            unk_10: AtomicU32::new(0x50),
-                            state: Default::default()
-                        }
-                    ))
-                },
-            )?)?;
-
         let sched = sched::Scheduler::new(dev, WQ_SIZE, 0, 100000, c_str!("asahi_sched"))?;
         // Priorities are handled by the AGX scheduler, there is no meaning within a
         // per-queue scheduler.
@@ -238,8 +294,8 @@ impl Queue::ver {
             buffer: None,
             gpu_context,
             notifier_list: Arc::try_new(notifier_list)?,
-            notifier,
             id,
+            fence_ctx: FenceContexts::new(1, QUEUE_NAME, &QUEUE_CLASS_KEY)?,
             #[ver(V >= V13_0B4)]
             counter: AtomicU64::new(0),
         };
@@ -255,7 +311,7 @@ impl Queue::ver {
 
             buffer.ensure_blocks(tvb_blocks)?;
 
-            ret.buffer = Some(buffer);
+            ret.buffer = Some(Mutex::new(buffer));
             ret.q_vtx = Some(SubQueue::ver {
                 wq: workqueue::WorkQueue::ver::new(
                     alloc,
@@ -332,21 +388,64 @@ impl Queue for Queue::ver {
 
         let vm_bind = gpu.bind_vm(&self.vm)?;
 
-        let mut job = QueueJob::ver {
+        let mut alloc = gpu.alloc();
+
+        let threshold = alloc.shared.new_default::<fw::event::Threshold>()?;
+
+        let notifier: Arc<GpuObject<fw::event::Notifier::ver>> =
+            Arc::try_new(alloc.private.new_inplace(
+                fw::event::Notifier::ver { threshold },
+                |inner, ptr: &mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
+                    Ok(place!(
+                        ptr,
+                        fw::event::raw::Notifier::ver {
+                            threshold: inner.threshold.gpu_pointer(),
+                            generation: AtomicU32::new(id as u32),
+                            cur_count: AtomicU32::new(0),
+                            unk_10: AtomicU32::new(0x50),
+                            state: Default::default()
+                        }
+                    ))
+                },
+            )?)?;
+
+        core::mem::drop(alloc);
+
+        let mut job = self.entity.new_job(QueueJob::ver {
             dev: self.dev.clone(),
             vm_bind,
             sj_vtx: self.q_vtx.as_mut().map(|a| a.new_job()),
             sj_frag: self.q_frag.as_mut().map(|a| a.new_job()),
             sj_comp: self.q_comp.as_mut().map(|a| a.new_job()),
-        };
+            fence: self
+                .fence_ctx
+                .new_fence::<JobFence::ver>(0, Default::default())?
+                .into(),
+            notifier,
+        })?;
+
+        for sync in in_syncs {
+            job.add_dependency(sync.fence.expect("in_sync missing fence"))?;
+        }
 
         for cmd in commands {
             match cmd.cmd_type {
                 bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER => {
-                    //self.submit_render(gpu, job, cmd, id)?
+                    self.submit_render(&mut job, &cmd, id)?
+                }
+                bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE => {
+                    self.submit_compute(&mut job, &cmd, id)?
                 }
                 _ => return Err(EINVAL),
             }
+        }
+
+        let job = job.arm();
+        let out_fence = job.fences().finished();
+        job.push();
+
+        for sync in out_syncs {
+            sync.syncobj.replace_fence(Some(&out_fence));
         }
 
         todo!();

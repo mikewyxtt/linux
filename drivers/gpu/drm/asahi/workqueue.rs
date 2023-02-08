@@ -66,7 +66,7 @@ where
     error: Option<WorkError>,
     wptr: u32,
     vm_slot: u32,
-    callback: Option<C>,
+    callback: C,
 }
 
 trait GenSubmittedWork: Send + Sync {
@@ -93,17 +93,16 @@ impl<O: OpaqueGpuObject, C: FnOnce(O, Option<WorkError>) + Send + Sync> GenSubmi
     }
 
     fn complete(self: Box<Self>) {
-        if let SubmittedWork {
+        let SubmittedWork {
             object,
             value,
             error,
             wptr,
             vm_slot,
-            callback: Some(callback),
-        } = *self
-        {
-            callback(object, error);
-        }
+            callback,
+        } = *self;
+
+        callback(object, error);
     }
 
     fn mark_error(&mut self, value: event::EventValue, error: WorkError) -> bool {
@@ -162,6 +161,7 @@ pub(crate) struct Job {
     wq_size: u32,
     stamp_pointer: GpuWeakPointer<Stamp>,
     fw_stamp_pointer: GpuWeakPointer<FwStamp>,
+    event_slot: u32,
     wptr: u32,
     cmd_wptr: u32,
     start_value: EventValue,
@@ -183,24 +183,31 @@ pub(crate) struct JobSubmission<'a> {
 }
 
 #[versions(AGX)]
+pub(crate) struct JobEventInfo {
+    pub(crate) stamp_pointer: GpuWeakPointer<Stamp>,
+    pub(crate) fw_stamp_pointer: GpuWeakPointer<FwStamp>,
+    pub(crate) slot: u32,
+    pub(crate) cur_value: event::EventValue,
+    pub(crate) next_value: event::EventValue,
+    pub(crate) cmd_seq: u64,
+    pub(crate) info_ptr: GpuWeakPointer<QueueInfo::ver>,
+}
+
+#[versions(AGX)]
 impl Job::ver {
-    pub(crate) fn stamp_pointer(&self) -> GpuWeakPointer<Stamp> {
-        self.stamp_pointer
+    pub(crate) fn event_info(&self) -> JobEventInfo::ver {
+        JobEventInfo::ver {
+            stamp_pointer: self.stamp_pointer,
+            fw_stamp_pointer: self.fw_stamp_pointer,
+            slot: self.event_slot,
+            cur_value: self.cur_value,
+            next_value: self.cur_value.next(),
+            cmd_seq: self.start_seq + self.event_count as u64,
+            info_ptr: self.wq.info_pointer(),
+        }
     }
 
-    pub(crate) fn fw_stamp_pointer(&self) -> GpuWeakPointer<FwStamp> {
-        self.fw_stamp_pointer
-    }
-
-    pub(crate) fn cur_event_value(&self) -> event::EventValue {
-        self.cur_value
-    }
-
-    pub(crate) fn next_event_value(&self) -> event::EventValue {
-        self.cur_value.next()
-    }
-
-    pub(crate) fn advance_event_value(&mut self) {
+    pub(crate) fn next_seq(&mut self) {
         self.event_count += 1;
         self.cur_value.increment();
     }
@@ -209,7 +216,15 @@ impl Job::ver {
         &mut self,
         command: O,
         vm_slot: u32,
-        callback: Option<impl FnOnce(O, Option<WorkError>) + Sync + Send + 'static>,
+    ) -> Result {
+        self.add_cb(command, vm_slot, |_, _| {})
+    }
+
+    pub(crate) fn add_cb<O: object::OpaqueGpuObject + 'static>(
+        &mut self,
+        command: O,
+        vm_slot: u32,
+        callback: impl FnOnce(O, Option<WorkError>) + Sync + Send + 'static,
     ) -> Result {
         if self.committed {
             pr_err!("WorkQueue: Tried to mutate committed Job");
@@ -218,7 +233,7 @@ impl Job::ver {
 
         self.pending.try_push(Box::try_new(SubmittedWork::<_, _> {
             object: command,
-            value: self.next_event_value(),
+            value: self.cur_value.next(),
             error: None,
             callback,
             wptr: self.cmd_wptr,
@@ -519,6 +534,7 @@ impl WorkQueue::ver {
             wq_size: inner.size,
             stamp_pointer: ev.stamp_pointer(),
             fw_stamp_pointer: ev.fw_stamp_pointer(),
+            event_slot: ev.slot(),
             start_value: ev.current(),
             cur_value: ev.current(),
             pending: Vec::new(),
