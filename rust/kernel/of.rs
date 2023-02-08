@@ -124,7 +124,11 @@ impl Node {
     pub(crate) unsafe fn get_from_raw(raw_node: *mut bindings::device_node) -> Option<Node> {
         // SAFETY: `raw_node` is valid or NULL per the above contract. `of_node_get` can handle
         // NULL.
-        unsafe { Node::from_raw(bindings::of_node_get(raw_node)) }
+        #[cfg(CONFIG_OF_DYNAMIC)]
+        unsafe {
+            bindings::of_node_get(raw_node);
+        }
+        unsafe { Node::from_raw(raw_node) }
     }
 
     /// Returns a reference to the underlying C `device_node` structure.
@@ -441,7 +445,10 @@ where
 {
     fn drop(&mut self) {
         // SAFETY: `cur` is valid or NULL, and `of_node_put()` can handle NULL.
-        unsafe { bindings::of_node_put(self.cur) };
+        #[cfg(CONFIG_OF_DYNAMIC)]
+        unsafe {
+            bindings::of_node_put(self.cur);
+        }
     }
 }
 
@@ -481,6 +488,9 @@ impl Clone for Node {
 impl Drop for Node {
     fn drop(&mut self) {
         // SAFETY: `raw_node` is valid per the type invariant.
-        unsafe { bindings::of_node_put(self.raw_node) };
+        #[cfg(CONFIG_OF_DYNAMIC)]
+        unsafe {
+            bindings::of_node_put(self.raw_node);
+        }
     }
 }
