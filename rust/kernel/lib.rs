@@ -114,6 +114,11 @@ pub mod kunit;
 #[doc(hidden)]
 pub use build_error::build_error;
 
+pub(crate) mod private {
+    #[allow(unreachable_pub)]
+    pub trait Sealed {}
+}
+
 pub use crate::error::{to_result, Error, Result};
 pub use crate::types::{
     bit, bits_iter, ARef, AlwaysRefCounted, Bit, Bool, Either, Either::Left, Either::Right, False,
