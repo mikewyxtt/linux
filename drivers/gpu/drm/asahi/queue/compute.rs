@@ -330,6 +330,7 @@ impl super::Queue::ver {
 
         core::mem::drop(alloc);
 
+        fence.add_command();
         comp_job.add_cb(comp, vm_bind.slot(), move |cmd, error| {
             if let Some(err) = error {
                 fence.set_error(err.into())

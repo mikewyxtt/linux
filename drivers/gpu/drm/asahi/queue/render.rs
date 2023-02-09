@@ -728,6 +728,7 @@ impl super::Queue::ver {
             },
         )?;
 
+        fence.add_command();
         frag_job.add_cb(frag, vm_bind.slot(), move |cmd, error| {
             if let Some(err) = error {
                 fence.set_error(err.into())
@@ -1044,6 +1045,7 @@ impl super::Queue::ver {
 
         core::mem::drop(alloc);
 
+        fence.add_command();
         vtx_job.add_cb(vtx, vm_bind.slot(), move |cmd, error| {
             if let Some(err) = error {
                 fence.set_error(err.into())

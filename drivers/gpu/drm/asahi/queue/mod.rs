@@ -116,6 +116,10 @@ pub(crate) struct JobFence {
 
 #[versions(AGX)]
 impl JobFence::ver {
+    fn add_command(self: &FenceObject<Self>) {
+        self.pending.fetch_add(1, Ordering::Relaxed);
+    }
+
     fn command_complete(self: &FenceObject<Self>) {
         if self.pending.fetch_sub(1, Ordering::Relaxed) == 1 && self.signal().is_err() {
             pr_err!("Fence signal failed\n");
