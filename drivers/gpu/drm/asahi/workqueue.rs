@@ -31,6 +31,8 @@ use kernel::{
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::WorkQueue;
 
+const MAX_JOB_SLOTS: u32 = 127;
+
 /// An enum of possible errors that might cause a piece of work to fail execution.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum WorkError {
@@ -76,6 +78,7 @@ trait GenSubmittedWork: Send + Sync {
     fn gpu_va(&self) -> NonZeroU64;
     fn value(&self) -> event::EventValue;
     fn wptr(&self) -> u32;
+    fn set_wptr(&mut self, wptr: u32);
     fn mark_error(&mut self, error: WorkError);
     fn complete(self: Box<Self>);
 }
@@ -93,6 +96,10 @@ impl<O: OpaqueGpuObject, C: FnOnce(O, Option<WorkError>) + Send + Sync> GenSubmi
 
     fn wptr(&self) -> u32 {
         self.wptr
+    }
+
+    fn set_wptr(&mut self, wptr: u32) {
+        self.wptr = wptr;
     }
 
     fn complete(self: Box<Self>) {
@@ -129,6 +136,8 @@ struct WorkQueueInner {
     pending: Vec<Box<dyn GenSubmittedWork>>,
     last_token: Option<event::Token>,
     pending_jobs: usize,
+    last_submitted: Option<event::EventValue>,
+    last_completed: Option<event::EventValue>,
     event: Option<(event::Event, event::EventValue)>,
     priority: u32,
     commit_seq: u64,
@@ -169,8 +178,6 @@ pub(crate) struct Job {
     wq: Arc<WorkQueue::ver>,
     wq_size: u32,
     event_info: QueueEventInfo::ver,
-    wptr: u32,
-    cmd_wptr: u32,
     start_value: EventValue,
     pending: Vec<Box<dyn GenSubmittedWork>>,
     committed: bool,
@@ -224,11 +231,9 @@ impl Job::ver {
             value: self.event_info.value.next(),
             error: None,
             callback,
-            wptr: self.cmd_wptr,
+            wptr: 0,
             vm_slot,
         })?)?;
-
-        self.cmd_wptr = (self.cmd_wptr + 1) % self.wq_size;
 
         Ok(())
     }
@@ -249,7 +254,12 @@ impl Job::ver {
         let ev = inner.event.as_mut().expect("WorkQueue: Job lost its event");
 
         if ev.1 != self.start_value {
-            pr_err!("WorkQueue: Job::commit() out of order (event)\n");
+            pr_err!(
+                "WorkQueue: Job::commit() out of order (event slot {} {:?} != {:?}\n",
+                ev.0.slot(),
+                ev.1,
+                self.start_value
+            );
             return Err(EINVAL);
         }
 
@@ -261,7 +271,7 @@ impl Job::ver {
     }
 
     pub(crate) fn can_submit(&self) -> bool {
-        self.wq.free_space() > self.pending.len()
+        self.wq.free_slots() > self.event_count && self.wq.free_space() > self.pending.len()
     }
 
     pub(crate) fn submit(&mut self) -> Result<JobSubmission::ver<'_>> {
@@ -283,21 +293,24 @@ impl Job::ver {
         let mut inner = self.wq.inner.lock();
 
         if inner.submit_seq != self.event_info.cmd_seq {
-            pr_err!("WorkQueue: Job::submit() out of order (start_seq)\n");
+            pr_err!(
+                "WorkQueue: Job::submit() out of order (submit_seq {} != {})\n",
+                inner.submit_seq,
+                self.event_info.cmd_seq
+            );
             return Err(EINVAL);
         }
 
         if inner.commit_seq < (self.event_info.cmd_seq + self.pending.len() as u64) {
-            pr_err!("WorkQueue: Job::submit() out of order (commit_seq)\n");
+            pr_err!(
+                "WorkQueue: Job::submit() out of order (commit_seq {} != {})\n",
+                inner.commit_seq,
+                (self.event_info.cmd_seq + self.pending.len() as u64)
+            );
             return Err(EINVAL);
         }
 
-        if self.wptr != inner.wptr {
-            pr_err!("WorkQueue: Job::submit() out of order (wptr)\n");
-            return Err(EINVAL);
-        }
-
-        let mut wptr = self.wptr;
+        let mut wptr = inner.wptr;
         let command_count = self.pending.len();
 
         if inner.free_space() <= command_count {
@@ -307,10 +320,14 @@ impl Job::ver {
 
         inner.pending.try_reserve(command_count)?;
 
-        for command in self.pending.drain(..) {
+        inner.last_submitted = inner.event.as_ref().map(|e| e.1);
+
+        for mut command in self.pending.drain(..) {
+            command.set_wptr(wptr);
+
             let next_wptr = (wptr + 1) % inner.size;
             assert!(inner.doneptr() != next_wptr);
-            inner.info.ring[self.wptr as usize] = command.gpu_va().get();
+            inner.info.ring[wptr as usize] = command.gpu_va().get();
             wptr = next_wptr;
 
             // Cannot fail, since we did a try_reserve(1) above
@@ -380,7 +397,16 @@ impl Drop for Job::ver {
         let mut inner = self.wq.inner.lock();
 
         if self.committed && !self.submitted {
+            let pipe_type = inner.pipe_type;
             let event = inner.event.as_mut().expect("Job lost its event");
+            mod_pr_debug!(
+                "WorkQueue({:?}): Roll back {} events (slot {} val {:#x?}) and {} commands\n",
+                pipe_type,
+                self.event_count,
+                event.0.slot(),
+                event.1,
+                self.pending.len()
+            );
             event.1.sub(self.event_count as u32);
             inner.commit_seq -= self.pending.len() as u64;
         }
@@ -388,8 +414,10 @@ impl Drop for Job::ver {
         inner.pending_jobs -= 1;
 
         if inner.pending.is_empty() && inner.pending_jobs == 0 {
-            mod_pr_debug!("WorkQueue({:?}): Dropping event", inner.pipe_type);
+            mod_pr_debug!("WorkQueue({:?}): Dropping event\n", inner.pipe_type);
             inner.event = None;
+            inner.last_submitted = None;
+            inner.last_completed = None;
         }
         mod_pr_debug!("WorkQueue({:?}): Dropped Job\n", inner.pipe_type);
     }
@@ -404,7 +432,16 @@ impl<'a> Drop for JobSubmission::ver<'a> {
         let new_len = inner.pending.len() - self.command_count;
         inner.pending.truncate(new_len);
 
+        let pipe_type = inner.pipe_type;
         let event = inner.event.as_mut().expect("JobSubmission lost its event");
+        mod_pr_debug!(
+            "WorkQueue({:?}): Roll back {} events (slot {} val {:#x?}) and {} commands\n",
+            pipe_type,
+            self.event_count,
+            event.0.slot(),
+            event.1,
+            self.command_count
+        );
         event.1.sub(self.event_count as u32);
         inner.commit_seq -= self.command_count as u64;
         mod_pr_debug!("WorkQueue({:?}): Dropped JobSubmission\n", inner.pipe_type);
@@ -416,6 +453,19 @@ impl WorkQueueInner::ver {
     /// Return the number of free entries in the workqueue
     pub(crate) fn free_space(&self) -> usize {
         self.size as usize - self.pending.len() - 1
+    }
+
+    pub(crate) fn free_slots(&self) -> usize {
+        let busy_slots = if let Some(ls) = self.last_submitted {
+            let lc = self
+                .last_completed
+                .expect("last_submitted but not completed?");
+            ls.delta(&lc)
+        } else {
+            0
+        };
+
+        ((MAX_JOB_SLOTS as i32) - busy_slots).max(0) as usize
     }
 }
 
@@ -493,6 +543,8 @@ impl WorkQueue::ver {
             pending_jobs: 0,
             commit_seq: 0,
             submit_seq: 0,
+            last_completed: None,
+            last_submitted: None,
         };
 
         let mut queue = Pin::from(UniqueArc::try_new(Self {
@@ -534,10 +586,19 @@ impl WorkQueue::ver {
         let mut inner = self.inner.lock();
 
         if inner.event.is_none() {
+            mod_pr_debug!("WorkQueue({:?}): Grabbing event\n", inner.pipe_type);
             let event = inner.event_manager.get(inner.last_token, self.clone())?;
             let cur = event.current();
             inner.last_token = Some(event.token());
+            mod_pr_debug!(
+                "WorkQueue({:?}): Grabbed event slot {}: {:#x?}\n",
+                inner.pipe_type,
+                event.slot(),
+                cur
+            );
             inner.event = Some((event, cur));
+            inner.last_submitted = Some(cur);
+            inner.last_completed = Some(cur);
         }
 
         inner.pending_jobs += 1;
@@ -560,14 +621,17 @@ impl WorkQueue::ver {
             event_count: 0,
             committed: false,
             submitted: false,
-            wptr: inner.wptr,
-            cmd_wptr: inner.wptr,
         })
     }
 
     /// Return the number of free entries in the workqueue
     pub(crate) fn free_space(&self) -> usize {
         self.inner.lock().free_space()
+    }
+
+    /// Return the number of free job slots in the workqueue
+    pub(crate) fn free_slots(&self) -> usize {
+        self.inner.lock().free_slots()
     }
 
     pub(crate) fn pipe_type(&self) -> PipeType {
@@ -598,6 +662,8 @@ impl WorkQueue for WorkQueue::ver {
             }
             Some(event) => event.0.current(),
         };
+
+        inner.last_completed = Some(value);
 
         mod_pr_debug!(
             "WorkQueue({:?}): Signaling event {:?} value {:#x?}",
@@ -664,6 +730,8 @@ impl WorkQueue for WorkQueue::ver {
         let empty = inner.pending.is_empty();
         if empty && inner.pending_jobs == 0 {
             inner.event = None;
+            inner.last_submitted = None;
+            inner.last_completed = None;
         }
 
         core::mem::drop(inner);

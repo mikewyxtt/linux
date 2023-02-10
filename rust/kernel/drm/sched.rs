@@ -221,7 +221,7 @@ impl<'a> JobFences<'a> {
 
     /// Returns a new reference to the job finished fence.
     pub fn finished(&mut self) -> Fence {
-        unsafe { Fence::get_raw(&mut self.0.scheduled) }
+        unsafe { Fence::get_raw(&mut self.0.finished) }
     }
 }
 

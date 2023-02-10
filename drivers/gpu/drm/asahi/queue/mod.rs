@@ -32,7 +32,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Queue;
 
-const WQ_SIZE: u32 = file::MAX_COMMANDS_IN_FLIGHT + 128;
+const WQ_SIZE: u32 = 0x500;
 
 mod common;
 mod compute;
@@ -53,7 +53,6 @@ pub(crate) trait Queue: Send + Sync {
 #[versions(AGX)]
 struct SubQueue {
     wq: Arc<workqueue::WorkQueue::ver>,
-    cmd_count: u64,
 }
 
 #[versions(AGX)]
@@ -110,10 +109,11 @@ pub(crate) struct Queue {
     buffer: Option<Mutex<buffer::Buffer::ver>>,
     gpu_context: Arc<GpuObject<fw::workqueue::GpuContextData>>,
     notifier_list: Arc<GpuObject<fw::event::NotifierList>>,
+    notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
     id: u64,
     fence_ctx: FenceContexts,
     #[ver(V >= V13_0B4)]
-    counter: u64,
+    counter: AtomicU64,
 }
 
 #[versions(AGX)]
@@ -129,8 +129,13 @@ impl JobFence::ver {
     }
 
     fn command_complete(self: &FenceObject<Self>) {
-        if self.pending.fetch_sub(1, Ordering::Relaxed) == 1 && self.signal().is_err() {
-            pr_err!("Fence signal failed\n");
+        let remain = self.pending.fetch_sub(1, Ordering::Relaxed) - 1;
+        mod_pr_debug!("JobFence: Command complete (remain: {})\n", remain);
+        if remain == 0 {
+            mod_pr_debug!("JobFence: Signaling\n");
+            if self.signal().is_err() {
+                pr_err!("Fence signal failed\n");
+            }
         }
     }
 }
@@ -156,7 +161,6 @@ pub(crate) struct QueueJob {
     sj_frag: Option<SubQueueJob::ver>,
     sj_comp: Option<SubQueueJob::ver>,
     fence: UserFence<JobFence::ver>,
-    notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
 }
 
 #[versions(AGX)]
@@ -317,6 +321,25 @@ impl Queue::ver {
             raw.list_head.next = Some(inner_weak_ptr!(self_ptr, list_head));
         });
 
+        let threshold = alloc.shared.new_default::<fw::event::Threshold>()?;
+
+        let notifier: Arc<GpuObject<fw::event::Notifier::ver>> =
+            Arc::try_new(alloc.private.new_inplace(
+                fw::event::Notifier::ver { threshold },
+                |inner, ptr: &mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
+                    Ok(place!(
+                        ptr,
+                        fw::event::raw::Notifier::ver {
+                            threshold: inner.threshold.gpu_pointer(),
+                            generation: AtomicU32::new(id as u32),
+                            cur_count: AtomicU32::new(0),
+                            unk_10: AtomicU32::new(0x50),
+                            state: Default::default()
+                        }
+                    ))
+                },
+            )?)?;
+
         let sched = sched::Scheduler::new(dev, WQ_SIZE, 0, 100000, c_str!("asahi_sched"))?;
         // Priorities are handled by the AGX scheduler, there is no meaning within a
         // per-queue scheduler.
@@ -334,6 +357,7 @@ impl Queue::ver {
             buffer: None,
             gpu_context,
             notifier_list: Arc::try_new(notifier_list)?,
+            notifier,
             id,
             fence_ctx: FenceContexts::new(1, QUEUE_NAME, &QUEUE_CLASS_KEY)?,
             #[ver(V >= V13_0B4)]
@@ -363,7 +387,6 @@ impl Queue::ver {
                     priority,
                     WQ_SIZE,
                 )?,
-                cmd_count: 0,
             });
         }
 
@@ -384,7 +407,6 @@ impl Queue::ver {
                     priority,
                     WQ_SIZE,
                 )?,
-                cmd_count: 0,
             });
         }
 
@@ -401,7 +423,6 @@ impl Queue::ver {
                     priority,
                     WQ_SIZE,
                 )?,
-                cmd_count: 0,
             });
         }
 
@@ -446,29 +467,6 @@ impl Queue for Queue::ver {
         let vm_bind = gpu.bind_vm(&self.vm)?;
         let vm_slot = vm_bind.slot();
 
-        let mut alloc = gpu.alloc();
-
-        let threshold = alloc.shared.new_default::<fw::event::Threshold>()?;
-
-        let notifier: Arc<GpuObject<fw::event::Notifier::ver>> =
-            Arc::try_new(alloc.private.new_inplace(
-                fw::event::Notifier::ver { threshold },
-                |inner, ptr: &mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
-                    Ok(place!(
-                        ptr,
-                        fw::event::raw::Notifier::ver {
-                            threshold: inner.threshold.gpu_pointer(),
-                            generation: AtomicU32::new(id as u32),
-                            cur_count: AtomicU32::new(0),
-                            unk_10: AtomicU32::new(0x50),
-                            state: Default::default()
-                        }
-                    ))
-                },
-            )?)?;
-
-        core::mem::drop(alloc);
-
         mod_dev_dbg!(self.dev, "Queue: Creating job\n");
         let mut job = self.entity.new_job(QueueJob::ver {
             dev: self.dev.clone(),
@@ -480,7 +478,6 @@ impl Queue for Queue::ver {
                 .fence_ctx
                 .new_fence::<JobFence::ver>(0, Default::default())?
                 .into(),
-            notifier,
         })?;
 
         mod_dev_dbg!(self.dev, "Queue: Adding {} in_syncs\n", in_syncs.len());
@@ -488,8 +485,19 @@ impl Queue for Queue::ver {
             job.add_dependency(sync.fence.expect("in_sync missing fence"))?;
         }
 
+        let mut last_render = None;
+        let mut last_compute = None;
+
+        for (i, cmd) in commands.iter().enumerate() {
+            match cmd.cmd_type {
+                bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER => last_render = Some(i),
+                bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE => last_compute = Some(i),
+                _ => return Err(EINVAL),
+            }
+        }
+
         mod_dev_dbg!(self.dev, "Queue: Submitting {} commands\n", commands.len());
-        for cmd in commands {
+        for (i, cmd) in commands.into_iter().enumerate() {
             for (queue_idx, index) in cmd.barriers.iter().enumerate() {
                 if *index == bindings::DRM_ASAHI_BARRIER_NONE as u32 {
                     continue;
@@ -528,7 +536,7 @@ impl Queue for Queue::ver {
 
             match cmd.cmd_type {
                 bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER => {
-                    self.submit_render(&mut job, &cmd, id)?;
+                    self.submit_render(&mut job, &cmd, id, last_render.unwrap() == i)?;
                     events[SQ_RENDER].try_push(Some(
                         job.sj_frag
                             .as_ref()
@@ -540,7 +548,7 @@ impl Queue for Queue::ver {
                     ))?;
                 }
                 bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE => {
-                    self.submit_compute(&mut job, &cmd, id)?;
+                    self.submit_compute(&mut job, &cmd, id, last_compute.unwrap() == i)?;
                     events[SQ_COMPUTE].try_push(Some(
                         job.sj_comp
                             .as_ref()

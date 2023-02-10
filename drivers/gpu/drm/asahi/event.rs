@@ -77,7 +77,7 @@ impl EventValue {
 
     /// Computes the delta between this event and another event.
     pub(crate) fn delta(&self, other: &EventValue) -> i32 {
-        self.0.wrapping_sub(other.0) as i32
+        (self.0.wrapping_sub(other.0) as i32) >> 8
     }
 }
 

@@ -163,6 +163,7 @@ impl super::Queue::ver {
         job: &mut Job<super::QueueJob::ver>,
         cmd: &bindings::drm_asahi_command,
         id: u64,
+        flush_stamps: bool,
     ) -> Result {
         if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER {
             return Err(EINVAL);
@@ -260,7 +261,7 @@ impl super::Queue::ver {
 
         let scene = Arc::try_new(buffer.new_scene(kalloc, &tile_info)?)?;
 
-        let notifier = job.notifier.clone();
+        let notifier = self.notifier.clone();
 
         let tvb_autogrown = buffer.auto_grow()?;
         if tvb_autogrown {
@@ -413,7 +414,7 @@ impl super::Queue::ver {
                     work_item: ptr,
                     vm_slot: vm_bind.slot(),
                     unk_50: 0x1, // fixed
-                    event_generation: id as u32,
+                    event_generation: self.id as u32,
                     buffer_slot: scene.slot(),
                     unk_5c: 0,
                     cmd_seq: U64(ev_frag.cmd_seq),
@@ -432,7 +433,7 @@ impl super::Queue::ver {
                     #[ver(V >= V13_0B4)]
                     counter: U64(count_frag),
                     #[ver(V >= V13_0B4)]
-                    notifier_buf: inner_weak_ptr!(job.notifier.weak_pointer(), state.unk_buf),
+                    notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
                 })?;
 
                 /*
@@ -715,7 +716,7 @@ impl super::Queue::ver {
                             stamp_value: ev_frag.value.next(),
                             stamp_slot: ev_frag.slot,
                             evctl_index: 0, // fixed
-                            flush_stamps: 0,
+                            flush_stamps: flush_stamps as u32,
                             uuid: uuid_3d,
                             cmd_seq: ev_frag.cmd_seq as u32,
                         },
@@ -803,7 +804,7 @@ impl super::Queue::ver {
                     work_queue: ev_vtx.info_ptr,
                     vm_slot: vm_bind.slot(),
                     unk_38: 1, // fixed
-                    event_generation: id as u32,
+                    event_generation: self.id as u32,
                     buffer_slot: scene.slot(),
                     unk_44: 0,
                     cmd_seq: U64(ev_vtx.cmd_seq),
@@ -823,7 +824,7 @@ impl super::Queue::ver {
                     #[ver(V >= V13_0B4)]
                     counter: U64(count_vtx),
                     #[ver(V >= V13_0B4)]
-                    notifier_buf: inner_weak_ptr!(job.notifier.weak_pointer(), state.unk_buf),
+                    notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
                     unk_178: 0x0, // padding?
                 })?;
 
@@ -1075,7 +1076,7 @@ impl super::Queue::ver {
         })?;
 
         mod_dev_dbg!(self.dev, "[Submission {}] Increment counters\n", id);
-        job.notifier.threshold.with(|raw, _inner| {
+        self.notifier.threshold.with(|raw, _inner| {
             raw.increment();
             raw.increment();
         });

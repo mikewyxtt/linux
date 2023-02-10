@@ -21,8 +21,8 @@ use kernel::{bindings, dma_fence, drm, xarray};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::File;
 
-const MAX_SYNCS_PER_SUBMISSION: u32 = 512;
-const MAX_COMMANDS_PER_SUBMISSION: u32 = 512;
+const MAX_SYNCS_PER_SUBMISSION: u32 = 64;
+const MAX_COMMANDS_PER_SUBMISSION: u32 = 64;
 pub(crate) const MAX_COMMANDS_IN_FLIGHT: u32 = 1024;
 
 /// A client instance of an `mmu::Vm` address space.
@@ -612,15 +612,44 @@ impl File {
             id
         );
 
+        mod_dev_dbg!(
+            device,
+            "[File {} Queue {}]: IOCTL: submit({}): Parsing in_syncs\n",
+            file.id,
+            data.queue_id,
+            id
+        );
         let in_syncs = SyncItem::parse_array(file, data.in_syncs, data.in_sync_count, false)?;
+        mod_dev_dbg!(
+            device,
+            "[File {} Queue {}]: IOCTL: submit({}): Parsing out_syncs\n",
+            file.id,
+            data.queue_id,
+            id
+        );
         let out_syncs = SyncItem::parse_array(file, data.out_syncs, data.out_sync_count, true)?;
 
         let result_buf = if data.result_handle != 0 {
+            mod_dev_dbg!(
+                device,
+                "[File {} Queue {}]: IOCTL: submit({}): Looking up result_handle {}\n",
+                file.id,
+                data.queue_id,
+                id,
+                data.result_handle
+            );
             Some(gem::lookup_handle(file, data.result_handle)?)
         } else {
             None
         };
 
+        mod_dev_dbg!(
+            device,
+            "[File {} Queue {}]: IOCTL: submit({}): Parsing commands\n",
+            file.id,
+            data.queue_id,
+            id
+        );
         let mut commands = Vec::try_with_capacity(data.command_count as usize)?;
 
         const STRIDE: usize = core::mem::size_of::<bindings::drm_asahi_command>();
