@@ -69,7 +69,9 @@ impl super::Queue::ver {
         }
         let cmdbuf = unsafe { cmdbuf.assume_init() };
 
-        // CHECKS HERE
+        if cmdbuf.flags != 0 {
+            return Err(EINVAL);
+        }
 
         // This sequence number increases per new client/VM? assigned to some slot,
         // but it's unclear *which* slot...

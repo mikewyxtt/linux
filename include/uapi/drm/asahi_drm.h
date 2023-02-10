@@ -324,6 +324,7 @@ struct drm_asahi_attachment {
 #define ASAHI_RENDER_SET_WHEN_RELOADING_Z_OR_S (1UL << 1)
 #define ASAHI_RENDER_MEMORYLESS_RTS_USED (1UL << 2)
 #define ASAHI_RENDER_PROCESS_EMPTY_TILES (1UL << 3)
+#define ASAHI_RENDER_NO_VERTEX_CLUSTERING (1UL << 4)
 
 struct drm_asahi_cmd_render {
 	/** @extensions: Pointer to the first extension struct, if any */

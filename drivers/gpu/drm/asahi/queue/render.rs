@@ -168,36 +168,6 @@ impl super::Queue::ver {
             return Err(EINVAL);
         }
 
-        let dev = self.dev.data();
-        let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
-            Some(gpu) => gpu,
-            None => panic!("GpuManager mismatched with Queue!"),
-        };
-
-        let nclusters = gpu.get_dyncfg().id.num_clusters;
-
-        // Can be set to false to disable clustering (for simpler jobs), but then the
-        // core masks below should be adjusted to cover a single rolling cluster.
-        let mut clustering = nclusters > 1;
-
-        if debug_enabled(debug::DebugFlags::DisableClustering) {
-            clustering = false;
-        }
-
-        #[ver(G < G14)]
-        let tiling_control = {
-            let render_cfg = gpu.get_cfg().render;
-            let mut tiling_control = render_cfg.tiling_control;
-
-            if !clustering {
-                tiling_control |= TILECTL_DISABLE_CLUSTERING;
-            }
-            tiling_control
-        };
-
-        let mut alloc = gpu.alloc();
-        let kalloc = &mut *alloc;
-
         mod_dev_dbg!(self.dev, "[Submission {}] Render!\n", id);
 
         let mut cmdbuf_reader = unsafe {
@@ -216,6 +186,17 @@ impl super::Queue::ver {
             )?;
         }
         let cmdbuf = unsafe { cmdbuf.assume_init() };
+
+        if cmdbuf.flags
+            & !(bindings::ASAHI_RENDER_NO_CLEAR_PIPELINE_TEXTURES
+                | bindings::ASAHI_RENDER_SET_WHEN_RELOADING_Z_OR_S
+                | bindings::ASAHI_RENDER_MEMORYLESS_RTS_USED
+                | bindings::ASAHI_RENDER_PROCESS_EMPTY_TILES
+                | bindings::ASAHI_RENDER_NO_VERTEX_CLUSTERING) as u64
+            != 0
+        {
+            return Err(EINVAL);
+        }
 
         if cmdbuf.flags & bindings::ASAHI_RENDER_MEMORYLESS_RTS_USED as u64 != 0 {
             // Not supported yet
@@ -236,6 +217,38 @@ impl super::Queue::ver {
             );
             return Err(EINVAL);
         }
+
+        let dev = self.dev.data();
+        let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
+            Some(gpu) => gpu,
+            None => panic!("GpuManager mismatched with Queue!"),
+        };
+
+        let nclusters = gpu.get_dyncfg().id.num_clusters;
+
+        // Can be set to false to disable clustering (for simpler jobs), but then the
+        // core masks below should be adjusted to cover a single rolling cluster.
+        let mut clustering = nclusters > 1;
+
+        if debug_enabled(debug::DebugFlags::DisableClustering)
+            || cmdbuf.flags & bindings::ASAHI_RENDER_NO_VERTEX_CLUSTERING as u64 != 0
+        {
+            clustering = false;
+        }
+
+        #[ver(G < G14)]
+        let tiling_control = {
+            let render_cfg = gpu.get_cfg().render;
+            let mut tiling_control = render_cfg.tiling_control;
+
+            if !clustering {
+                tiling_control |= TILECTL_DISABLE_CLUSTERING;
+            }
+            tiling_control
+        };
+
+        let mut alloc = gpu.alloc();
+        let kalloc = &mut *alloc;
 
         // This sequence number increases per new client/VM? assigned to some slot,
         // but it's unclear *which* slot...
