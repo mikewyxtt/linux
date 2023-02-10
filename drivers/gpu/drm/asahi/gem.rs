@@ -206,6 +206,11 @@ impl ObjectRef {
     pub(crate) fn drop_vm_mappings(&mut self, vm_id: u64) {
         self.gem.drop_vm_mappings(vm_id);
     }
+
+    /// Drop all mappings for this object owned by a given `File` identified by its ID.
+    pub(crate) fn drop_file_mappings(&mut self, file_id: u64) {
+        self.gem.drop_file_mappings(file_id);
+    }
 }
 
 /// Create a new kernel-owned GEM object.

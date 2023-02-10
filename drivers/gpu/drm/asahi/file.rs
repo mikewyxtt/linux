@@ -364,7 +364,7 @@ impl File {
         Ok(0)
     }
 
-    /// IOCTL: gem_bind: Map a GEM object into a Vm.
+    /// IOCTL: gem_bind: Map or unmap a GEM object into a Vm.
     pub(crate) fn gem_bind(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_gem_bind,
@@ -372,8 +372,9 @@ impl File {
     ) -> Result<u32> {
         mod_dev_dbg!(
             device,
-            "[File {} VM {}]: IOCTL: gem_bind handle={:#x?} flags={:#x?} {:#x?}:{:#x?} -> {:#x?}",
+            "[File {} VM {}]: IOCTL: gem_bind op={:?} handle={:#x?} flags={:#x?} {:#x?}:{:#x?} -> {:#x?}",
             file.id,
+            data.op,
             data.vm_id,
             data.handle,
             data.flags,
@@ -386,6 +387,21 @@ impl File {
             return Err(EINVAL);
         }
 
+        match data.op {
+            bindings::drm_asahi_bind_op_ASAHI_BIND_OP_BIND => Self::do_gem_bind(device, data, file),
+            bindings::drm_asahi_bind_op_ASAHI_BIND_OP_UNBIND => Err(ENOTSUPP),
+            bindings::drm_asahi_bind_op_ASAHI_BIND_OP_UNBIND_ALL => {
+                Self::do_gem_unbind_all(device, data, file)
+            }
+            _ => Err(EINVAL),
+        }
+    }
+
+    pub(crate) fn do_gem_bind(
+        device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_gem_bind,
+        file: &DrmFile,
+    ) -> Result<u32> {
         if data.offset != 0 {
             return Err(EINVAL); // Not supported yet
         }
@@ -445,6 +461,27 @@ impl File {
             .clone();
 
         bo.map_at(&vm, start, prot, true)?;
+
+        Ok(0)
+    }
+
+    pub(crate) fn do_gem_unbind_all(
+        device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_gem_bind,
+        file: &DrmFile,
+    ) -> Result<u32> {
+        if data.flags != 0 || data.offset != 0 || data.range != 0 || data.addr != 0 {
+            return Err(EINVAL);
+        }
+
+        let mut bo = gem::lookup_handle(file, data.handle)?;
+
+        if data.vm_id == 0 {
+            bo.drop_file_mappings(file.id);
+        } else {
+            let vm_id = file.vms.get(data.vm_id.try_into()?).ok_or(ENOENT)?.vm.id();
+            bo.drop_vm_mappings(vm_id);
+        }
 
         Ok(0)
     }
