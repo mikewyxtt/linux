@@ -306,14 +306,14 @@ impl super::Queue::ver {
             "[Submission {}] Vert event #{} -> {:#x?}\n",
             id,
             ev_vtx.slot,
-            ev_vtx.next_value,
+            ev_vtx.value.next(),
         );
         mod_dev_dbg!(
             self.dev,
             "[Submission {}] Frag event #{} -> {:#x?}\n",
             id,
             ev_frag.slot,
-            ev_frag.next_value,
+            ev_frag.value.next(),
         );
 
         let uuid_3d = cmdbuf.cmd_3d_id;
@@ -335,6 +335,7 @@ impl super::Queue::ver {
         let fence = job.fence.clone();
         let frag_job = job.get_frag()?;
 
+        mod_dev_dbg!(self.dev, "[Submission {}] Create Barrier\n", id);
         let barrier: GpuObject<fw::workqueue::Barrier> = kalloc.private.new_inplace(
             Default::default(),
             |_inner, ptr: &mut MaybeUninit<fw::workqueue::raw::Barrier>| {
@@ -343,9 +344,9 @@ impl super::Queue::ver {
                     fw::workqueue::raw::Barrier {
                         tag: fw::workqueue::CommandType::Barrier,
                         wait_stamp: ev_vtx.fw_stamp_pointer,
-                        wait_value: ev_vtx.next_value,
+                        wait_value: ev_vtx.value.next(),
                         wait_slot: ev_vtx.slot,
-                        stamp_self: ev_frag.next_value,
+                        stamp_self: ev_frag.value.next(),
                         uuid: uuid_3d,
                         unk: 0,
                     }
@@ -353,6 +354,7 @@ impl super::Queue::ver {
             },
         )?;
 
+        mod_dev_dbg!(self.dev, "[Submission {}] Add Barrier\n", id);
         frag_job.add(barrier, vm_bind.slot())?;
 
         let timestamps = Arc::try_new(kalloc.shared.new_default::<fw::job::JobTimestamps>()?)?;
@@ -387,6 +389,7 @@ impl super::Queue::ver {
         #[ver(V >= V13_0B4)]
         let count_vtx = count_frag + 1;
 
+        mod_dev_dbg!(self.dev, "[Submission {}] Create Frag\n", id);
         let frag = GpuObject::new_prealloc(
             kalloc.private.alloc_object()?,
             |ptr: GpuWeakPointer<fw::fragment::RunFragment::ver>| {
@@ -472,7 +475,7 @@ impl super::Queue::ver {
                     uuid: uuid_3d,
                     unk_8: 0,
                     fw_stamp: ev_frag.fw_stamp_pointer,
-                    stamp_value: ev_frag.next_value,
+                    stamp_value: ev_frag.value.next(),
                     unk_18: 0,
                     scene: scene.weak_pointer(),
                     buffer: scene.weak_buffer_pointer(),
@@ -709,7 +712,7 @@ impl super::Queue::ver {
                             unk_4: 0,
                             stamp: ev_frag.stamp_pointer,
                             fw_stamp: ev_frag.fw_stamp_pointer,
-                            stamp_value: ev_frag.next_value,
+                            stamp_value: ev_frag.value.next(),
                             stamp_slot: ev_frag.slot,
                             evctl_index: 0, // fixed
                             flush_stamps: 0,
@@ -741,6 +744,7 @@ impl super::Queue::ver {
             },
         )?;
 
+        mod_dev_dbg!(self.dev, "[Submission {}] Add Frag\n", id);
         fence.add_command();
         frag_job.add_cb(frag, vm_bind.slot(), move |cmd, error| {
             if let Some(err) = error {
@@ -753,6 +757,7 @@ impl super::Queue::ver {
         let vtx_job = job.get_vtx()?;
 
         if scene.rebind() || tvb_grown || tvb_autogrown {
+            mod_dev_dbg!(self.dev, "[Submission {}] Create Bind Buffer\n", id);
             let bind_buffer = kalloc.private.new_inplace(
                 fw::buffer::InitBuffer::ver {
                     scene: scene.clone(),
@@ -767,15 +772,17 @@ impl super::Queue::ver {
                             unk_c: 0,
                             block_count: buffer.block_count(),
                             buffer: inner.scene.buffer_pointer(),
-                            stamp_value: ev_vtx.next_value,
+                            stamp_value: ev_vtx.value.next(),
                         }
                     ))
                 },
             )?;
 
+            mod_dev_dbg!(self.dev, "[Submission {}] Add Bind Buffer\n", id);
             vtx_job.add(bind_buffer, vm_bind.slot())?;
         }
 
+        mod_dev_dbg!(self.dev, "[Submission {}] Create Vertex\n", id);
         let vtx = GpuObject::new_prealloc(
             kalloc.private.alloc_object()?,
             |ptr: GpuWeakPointer<fw::vertex::RunVertex::ver>| {
@@ -867,7 +874,7 @@ impl super::Queue::ver {
                     unk_34: 0x0, // fixed
                     uuid: uuid_ta,
                     fw_stamp: ev_vtx.fw_stamp_pointer,
-                    stamp_value: ev_vtx.next_value,
+                    stamp_value: ev_vtx.value.next(),
                     unk_48: U64(0x0), // fixed
                     unk_50: 0x0,      // fixed
                     unk_54: 0x0,      // fixed
@@ -983,7 +990,7 @@ impl super::Queue::ver {
                         microsequence: inner.micro_seq.gpu_pointer(),
                         microsequence_size: inner.micro_seq.len() as u32,
                         fragment_stamp_slot: ev_frag.slot,
-                        fragment_stamp_value: ev_frag.next_value,
+                        fragment_stamp_value: ev_frag.value.next(),
                         unk_pointee: 0,
                         unk_pad: 0,
                         job_params2: fw::vertex::raw::JobParameters2 {
@@ -1022,7 +1029,7 @@ impl super::Queue::ver {
                             unk_4: 0,
                             stamp: ev_vtx.stamp_pointer,
                             fw_stamp: ev_vtx.fw_stamp_pointer,
-                            stamp_value: ev_vtx.next_value,
+                            stamp_value: ev_vtx.value.next(),
                             stamp_slot: ev_vtx.slot,
                             evctl_index: 0, // fixed
                             flush_stamps: 0,
@@ -1058,6 +1065,7 @@ impl super::Queue::ver {
 
         core::mem::drop(alloc);
 
+        mod_dev_dbg!(self.dev, "[Submission {}] Add Vertex\n", id);
         fence.add_command();
         vtx_job.add_cb(vtx, vm_bind.slot(), move |cmd, error| {
             if let Some(err) = error {
@@ -1066,6 +1074,7 @@ impl super::Queue::ver {
             fence.command_complete();
         })?;
 
+        mod_dev_dbg!(self.dev, "[Submission {}] Increment counters\n", id);
         job.notifier.threshold.with(|raw, _inner| {
             raw.increment();
             raw.increment();

@@ -251,6 +251,8 @@ enum drm_asahi_subqueue {
 	DRM_ASAHI_SUBQUEUE_COUNT = 2,
 };
 
+#define DRM_ASAHI_BARRIER_NONE ~(0U)
+
 struct drm_asahi_command {
 	/** @extensions: Pointer to the first extension struct, if any */
 	__u64 extensions;
@@ -281,6 +283,15 @@ struct drm_asahi_submit {
 	/** @extensions: Pointer to the first extension struct, if any */
 	__u64 extensions;
 
+	/** @in_syncs: An optional array of drm_asahi_sync to wait on before starting this job. */
+	__u64 in_syncs;
+
+	/** @in_syncs: An optional array of drm_asahi_sync objects to signal upon completion. */
+	__u64 out_syncs;
+
+	/** @commands: Pointer to the drm_asahi_command array of commands to submit. */
+	__u64 commands;
+
 	/** @flags: Flags for command submission (MBZ) */
 	__u32 flags;
 
@@ -298,15 +309,6 @@ struct drm_asahi_submit {
 
 	/** @pad: Number of commands to be submitted */
 	__u32 command_count;
-
-	/** @in_syncs: An optional array of drm_asahi_sync to wait on before starting this job. */
-	__u64 in_syncs;
-
-	/** @in_syncs: An optional array of drm_asahi_sync objects to signal upon completion. */
-	__u64 out_syncs;
-
-	/** @commands: Pointer to the drm_asahi_command array of commands to submit. */
-	__u64 commands;
 };
 
 #define ASAHI_ATTACHMENT_C    0

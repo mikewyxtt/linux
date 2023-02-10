@@ -111,8 +111,8 @@ impl super::Queue::ver {
             "[Submission {}] Event #{} {:#x?} -> {:#x?}\n",
             id,
             ev_comp.slot,
-            ev_comp.cur_value,
-            ev_comp.next_value,
+            ev_comp.value,
+            ev_comp.value.next(),
         );
 
         let timestamps = Arc::try_new(kalloc.shared.new_default::<fw::job::JobTimestamps>()?)?;
@@ -207,7 +207,7 @@ impl super::Queue::ver {
                     unk_24: 0,
                     uuid,
                     fw_stamp: ev_comp.fw_stamp_pointer,
-                    stamp_value: ev_comp.next_value,
+                    stamp_value: ev_comp.value.next(),
                     unk_38: 0,
                     unk_3c: 0,
                     unk_40: 0,
@@ -299,7 +299,7 @@ impl super::Queue::ver {
                             unk_4: 0,
                             stamp: ev_comp.stamp_pointer,
                             fw_stamp: ev_comp.fw_stamp_pointer,
-                            stamp_value: ev_comp.next_value,
+                            stamp_value: ev_comp.value.next(),
                             stamp_slot: ev_comp.slot,
                             evctl_index: 0, // fixed
                             flush_stamps: 0,

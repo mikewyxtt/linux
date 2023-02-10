@@ -156,60 +156,50 @@ impl WorkQueueInner::ver {
 }
 
 #[versions(AGX)]
+#[derive(Copy, Clone)]
+pub(crate) struct QueueEventInfo {
+    pub(crate) stamp_pointer: GpuWeakPointer<Stamp>,
+    pub(crate) fw_stamp_pointer: GpuWeakPointer<FwStamp>,
+    pub(crate) slot: u32,
+    pub(crate) value: event::EventValue,
+    pub(crate) cmd_seq: u64,
+    pub(crate) info_ptr: GpuWeakPointer<QueueInfo::ver>,
+}
+
+#[versions(AGX)]
 pub(crate) struct Job {
     wq: Arc<WorkQueue::ver>,
     wq_size: u32,
-    stamp_pointer: GpuWeakPointer<Stamp>,
-    fw_stamp_pointer: GpuWeakPointer<FwStamp>,
-    event_slot: u32,
+    event_info: QueueEventInfo::ver,
     wptr: u32,
     cmd_wptr: u32,
     start_value: EventValue,
-    cur_value: EventValue,
     pending: Vec<Box<dyn GenSubmittedWork>>,
     committed: bool,
     submitted: bool,
-    start_seq: u64,
     event_count: usize,
 }
 
 #[versions(AGX)]
 pub(crate) struct JobSubmission<'a> {
     inner: Guard<'a, Mutex<WorkQueueInner::ver>>,
-    event_value: EventValue,
     wptr: u32,
     event_count: usize,
     command_count: usize,
 }
 
 #[versions(AGX)]
-pub(crate) struct JobEventInfo {
-    pub(crate) stamp_pointer: GpuWeakPointer<Stamp>,
-    pub(crate) fw_stamp_pointer: GpuWeakPointer<FwStamp>,
-    pub(crate) slot: u32,
-    pub(crate) cur_value: event::EventValue,
-    pub(crate) next_value: event::EventValue,
-    pub(crate) cmd_seq: u64,
-    pub(crate) info_ptr: GpuWeakPointer<QueueInfo::ver>,
-}
-
-#[versions(AGX)]
 impl Job::ver {
-    pub(crate) fn event_info(&self) -> JobEventInfo::ver {
-        JobEventInfo::ver {
-            stamp_pointer: self.stamp_pointer,
-            fw_stamp_pointer: self.fw_stamp_pointer,
-            slot: self.event_slot,
-            cur_value: self.cur_value,
-            next_value: self.cur_value.next(),
-            cmd_seq: self.start_seq + self.event_count as u64,
-            info_ptr: self.wq.info_pointer(),
-        }
+    pub(crate) fn event_info(&self) -> QueueEventInfo::ver {
+        let mut info = self.event_info;
+        info.cmd_seq += self.event_count as u64;
+
+        info
     }
 
     pub(crate) fn next_seq(&mut self) {
         self.event_count += 1;
-        self.cur_value.increment();
+        self.event_info.value.increment();
     }
 
     pub(crate) fn add<O: object::OpaqueGpuObject + 'static>(
@@ -233,7 +223,7 @@ impl Job::ver {
 
         self.pending.try_push(Box::try_new(SubmittedWork::<_, _> {
             object: command,
-            value: self.cur_value.next(),
+            value: self.event_info.value.next(),
             error: None,
             callback,
             wptr: self.cmd_wptr,
@@ -265,7 +255,7 @@ impl Job::ver {
             return Err(EINVAL);
         }
 
-        ev.1 = self.cur_value;
+        ev.1 = self.event_info.value;
         inner.commit_seq += self.pending.len() as u64;
         self.committed = true;
 
@@ -294,12 +284,12 @@ impl Job::ver {
 
         let mut inner = self.wq.inner.lock();
 
-        if inner.submit_seq != self.start_seq {
+        if inner.submit_seq != self.event_info.cmd_seq {
             pr_err!("WorkQueue: Job::submit() out of order (start_seq)");
             return Err(EINVAL);
         }
 
-        if inner.commit_seq < (self.start_seq + self.pending.len() as u64) {
+        if inner.commit_seq < (self.event_info.cmd_seq + self.pending.len() as u64) {
             pr_err!("WorkQueue: Job::submit() out of order (commit_seq)");
             return Err(EINVAL);
         }
@@ -336,7 +326,6 @@ impl Job::ver {
 
         Ok(JobSubmission::ver {
             inner,
-            event_value: self.cur_value,
             wptr,
             command_count,
             event_count: self.event_count,
@@ -360,7 +349,6 @@ impl<'a> JobSubmission::ver<'a> {
             .as_mut()
             .expect("JobSubmission lost its event");
 
-        event.1 = self.event_value;
         let event_slot = event.0.slot();
 
         let msg = fw::channels::RunWorkQueueMsg::ver {
@@ -515,6 +503,19 @@ impl WorkQueue::ver {
         self.info_pointer
     }
 
+    pub(crate) fn event_info(&self) -> Option<QueueEventInfo::ver> {
+        let inner = self.inner.lock();
+
+        inner.event.as_ref().map(|ev| QueueEventInfo::ver {
+            stamp_pointer: ev.0.stamp_pointer(),
+            fw_stamp_pointer: ev.0.fw_stamp_pointer(),
+            slot: ev.0.slot(),
+            value: ev.1,
+            cmd_seq: inner.commit_seq,
+            info_ptr: self.info_pointer,
+        })
+    }
+
     pub(crate) fn new_job(self: &Arc<Self>) -> Result<Job::ver> {
         let mut inner = self.inner.lock();
 
@@ -527,21 +528,24 @@ impl WorkQueue::ver {
 
         inner.pending_jobs += 1;
 
-        let ev = &inner.event.as_ref().unwrap().0;
+        let ev = &inner.event.as_ref().unwrap();
 
         Ok(Job::ver {
             wq: self.clone(),
             wq_size: inner.size,
-            stamp_pointer: ev.stamp_pointer(),
-            fw_stamp_pointer: ev.fw_stamp_pointer(),
-            event_slot: ev.slot(),
-            start_value: ev.current(),
-            cur_value: ev.current(),
+            event_info: QueueEventInfo::ver {
+                stamp_pointer: ev.0.stamp_pointer(),
+                fw_stamp_pointer: ev.0.fw_stamp_pointer(),
+                slot: ev.0.slot(),
+                value: ev.1,
+                cmd_seq: inner.commit_seq,
+                info_ptr: self.info_pointer,
+            },
+            start_value: ev.1,
             pending: Vec::new(),
             event_count: 0,
             committed: false,
             submitted: false,
-            start_seq: inner.commit_seq,
             wptr: inner.wptr,
             cmd_wptr: inner.wptr,
         })
@@ -550,6 +554,10 @@ impl WorkQueue::ver {
     /// Return the number of free entries in the workqueue
     pub(crate) fn free_space(&self) -> usize {
         self.inner.lock().free_space()
+    }
+
+    pub(crate) fn pipe_type(&self) -> PipeType {
+        self.inner.lock().pipe_type
     }
 }
 
@@ -568,7 +576,7 @@ impl WorkQueue for WorkQueue::ver {
     fn signal(&self) -> bool {
         let mut inner = self.inner.lock();
         let event = inner.event.as_ref();
-        let cur_value = match event {
+        let value = match event {
             None => {
                 pr_err!("WorkQueue: signal() called but no event?");
                 return true;
@@ -580,13 +588,13 @@ impl WorkQueue for WorkQueue::ver {
             "WorkQueue({:?}): Signaling event {:?} value {:#x?}",
             inner.pipe_type,
             inner.last_token,
-            cur_value
+            value
         );
 
         let mut completed_commands: usize = 0;
 
         for cmd in inner.pending.iter() {
-            if cmd.value() <= cur_value {
+            if cmd.value() <= value {
                 mod_pr_debug!(
                     "WorkQueue({:?}): Command at value {:#x?} complete",
                     inner.pipe_type,

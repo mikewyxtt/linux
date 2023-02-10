@@ -76,9 +76,17 @@ struct SubQueueJob {
 impl SubQueueJob::ver {
     fn get(&mut self) -> Result<&mut workqueue::Job::ver> {
         if self.job.is_none() {
+            mod_pr_debug!("SubQueueJob: Creating {:?} job\n", self.wq.pipe_type());
             self.job.replace(self.wq.new_job()?);
         }
         Ok(self.job.as_mut().expect("expected a Job"))
+    }
+
+    fn commit(&mut self) -> Result {
+        match self.job.as_mut() {
+            Some(job) => job.commit(),
+            None => Ok(()),
+        }
     }
 
     fn can_submit(&self) -> bool {
@@ -162,11 +170,24 @@ impl QueueJob::ver {
     fn get_comp(&mut self) -> Result<&mut workqueue::Job::ver> {
         self.sj_comp.as_mut().ok_or(EINVAL)?.get()
     }
+
+    fn commit(&mut self) -> Result {
+        mod_dev_dbg!(self.dev, "QueueJob: Committing\n");
+
+        self.sj_vtx.as_mut().map(|a| a.commit()).unwrap_or(Ok(()))?;
+        self.sj_frag
+            .as_mut()
+            .map(|a| a.commit())
+            .unwrap_or(Ok(()))?;
+        self.sj_comp.as_mut().map(|a| a.commit()).unwrap_or(Ok(()))
+    }
 }
 
 #[versions(AGX)]
 impl sched::JobImpl for QueueJob::ver {
     fn can_run(job: &mut sched::Job<Self>) -> bool {
+        mod_dev_dbg!(job.dev, "QueueJob: Checking runnability\n");
+
         if let Some(sj) = job.sj_vtx.as_ref() {
             if !sj.can_submit() {
                 mod_dev_dbg!(job.dev, "QueueJob: Blocking due to vertex queue full\n");
@@ -194,21 +215,23 @@ impl sched::JobImpl for QueueJob::ver {
 
         // First submit all the commands for each queue. This can fail.
 
-        let mut vtx_job = None;
-        let mut vtx_sub = None;
-        if let Some(sj) = job.sj_vtx.as_mut() {
-            vtx_job = sj.job.take();
-            if let Some(job) = vtx_job.as_mut() {
-                vtx_sub = Some(job.submit()?);
-            }
-        }
-
         let mut frag_job = None;
         let mut frag_sub = None;
         if let Some(sj) = job.sj_frag.as_mut() {
             frag_job = sj.job.take();
-            if let Some(job) = frag_job.as_mut() {
-                frag_sub = Some(job.submit()?);
+            if let Some(wqjob) = frag_job.as_mut() {
+                mod_dev_dbg!(job.dev, "QueueJob: Submit fragment\n");
+                frag_sub = Some(wqjob.submit()?);
+            }
+        }
+
+        let mut vtx_job = None;
+        let mut vtx_sub = None;
+        if let Some(sj) = job.sj_vtx.as_mut() {
+            vtx_job = sj.job.take();
+            if let Some(wqjob) = vtx_job.as_mut() {
+                mod_dev_dbg!(job.dev, "QueueJob: Submit vertex\n");
+                vtx_sub = Some(wqjob.submit()?);
             }
         }
 
@@ -216,8 +239,9 @@ impl sched::JobImpl for QueueJob::ver {
         let mut comp_sub = None;
         if let Some(sj) = job.sj_comp.as_mut() {
             comp_job = sj.job.take();
-            if let Some(job) = comp_job.as_mut() {
-                comp_sub = Some(job.submit()?);
+            if let Some(wqjob) = comp_job.as_mut() {
+                mod_dev_dbg!(job.dev, "QueueJob: Submit compute\n");
+                comp_sub = Some(wqjob.submit()?);
             }
         }
 
@@ -228,8 +252,11 @@ impl sched::JobImpl for QueueJob::ver {
         };
 
         // Now we fully commit to running the job
-        vtx_sub.map(|a| gpu.run_job(a)).transpose()?;
+        mod_dev_dbg!(job.dev, "QueueJob: Run fragment\n");
         frag_sub.map(|a| gpu.run_job(a)).transpose()?;
+        mod_dev_dbg!(job.dev, "QueueJob: Run vertex\n");
+        vtx_sub.map(|a| gpu.run_job(a)).transpose()?;
+        mod_dev_dbg!(job.dev, "QueueJob: Run compute\n");
         comp_sub.map(|a| gpu.run_job(a)).transpose()?;
 
         Ok(Some(Fence::from_fence(&job.fence)))
@@ -374,6 +401,10 @@ impl Queue::ver {
     }
 }
 
+const SQ_RENDER: usize = bindings::drm_asahi_subqueue_DRM_ASAHI_SUBQUEUE_RENDER as usize;
+const SQ_COMPUTE: usize = bindings::drm_asahi_subqueue_DRM_ASAHI_SUBQUEUE_COMPUTE as usize;
+const SQ_COUNT: usize = bindings::drm_asahi_subqueue_DRM_ASAHI_SUBQUEUE_COUNT as usize;
+
 #[versions(AGX)]
 impl Queue for Queue::ver {
     fn submit(
@@ -390,7 +421,16 @@ impl Queue for Queue::ver {
             None => panic!("GpuManager mismatched with Queue!"),
         };
 
+        mod_dev_dbg!(self.dev, "Queue: Submit job\n");
+
+        let mut events: [Vec<Option<workqueue::QueueEventInfo::ver>>; SQ_COUNT] =
+            Default::default();
+
+        events[SQ_RENDER].try_push(self.q_frag.as_ref().and_then(|a| a.wq.event_info()))?;
+        events[SQ_COMPUTE].try_push(self.q_comp.as_ref().and_then(|a| a.wq.event_info()))?;
+
         let vm_bind = gpu.bind_vm(&self.vm)?;
+        let vm_slot = vm_bind.slot();
 
         let mut alloc = gpu.alloc();
 
@@ -415,6 +455,7 @@ impl Queue for Queue::ver {
 
         core::mem::drop(alloc);
 
+        mod_dev_dbg!(self.dev, "Queue: Creating job\n");
         let mut job = self.entity.new_job(QueueJob::ver {
             dev: self.dev.clone(),
             vm_bind,
@@ -428,31 +469,93 @@ impl Queue for Queue::ver {
             notifier,
         })?;
 
+        mod_dev_dbg!(self.dev, "Queue: Adding {} in_syncs\n", in_syncs.len());
         for sync in in_syncs {
             job.add_dependency(sync.fence.expect("in_sync missing fence"))?;
         }
 
+        mod_dev_dbg!(self.dev, "Queue: Submitting {} commands\n", commands.len());
         for cmd in commands {
+            for (queue_idx, index) in cmd.barriers.iter().enumerate() {
+                if *index == bindings::DRM_ASAHI_BARRIER_NONE as u32 {
+                    continue;
+                }
+                if let Some(event) = events[queue_idx].get(*index as usize).ok_or(EINVAL)? {
+                    let mut alloc = gpu.alloc();
+                    let queue_job = match cmd.cmd_type {
+                        bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER => job.get_vtx()?,
+                        bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE => job.get_comp()?,
+                        _ => return Err(EINVAL),
+                    };
+                    mod_dev_dbg!(self.dev, "[Submission {}] Create Explicit Barrier\n", id);
+                    let barrier: GpuObject<fw::workqueue::Barrier> = alloc.private.new_inplace(
+                        Default::default(),
+                        |_inner, ptr: &mut MaybeUninit<fw::workqueue::raw::Barrier>| {
+                            Ok(place!(
+                                ptr,
+                                fw::workqueue::raw::Barrier {
+                                    tag: fw::workqueue::CommandType::Barrier,
+                                    wait_stamp: event.fw_stamp_pointer,
+                                    wait_value: event.value,
+                                    wait_slot: event.slot,
+                                    stamp_self: queue_job.event_info().value.next(),
+                                    uuid: 0xffffbbbb,
+                                    unk: 0,
+                                }
+                            ))
+                        },
+                    )?;
+                    mod_dev_dbg!(self.dev, "[Submission {}] Add Explicit Barrier\n", id);
+                    queue_job.add(barrier, vm_slot)?;
+                } else {
+                    assert!(*index == 0);
+                }
+            }
+
             match cmd.cmd_type {
                 bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER => {
-                    self.submit_render(&mut job, &cmd, id)?
+                    self.submit_render(&mut job, &cmd, id)?;
+                    events[SQ_RENDER].try_push(Some(
+                        job.sj_frag
+                            .as_ref()
+                            .expect("No frag queue?")
+                            .job
+                            .as_ref()
+                            .expect("No frag job?")
+                            .event_info(),
+                    ))?;
                 }
                 bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE => {
-                    self.submit_compute(&mut job, &cmd, id)?
+                    self.submit_compute(&mut job, &cmd, id)?;
+                    events[SQ_COMPUTE].try_push(Some(
+                        job.sj_comp
+                            .as_ref()
+                            .expect("No comp queue?")
+                            .job
+                            .as_ref()
+                            .expect("No comp job?")
+                            .event_info(),
+                    ))?;
                 }
                 _ => return Err(EINVAL),
             }
         }
 
+        mod_dev_dbg!(self.dev, "Queue: Committing job\n");
+        job.commit()?;
+
+        mod_dev_dbg!(self.dev, "Queue: Arming job\n");
         let job = job.arm();
         let out_fence = job.fences().finished();
+        mod_dev_dbg!(self.dev, "Queue: Pushing job\n");
         job.push();
 
+        mod_dev_dbg!(self.dev, "Queue: Adding {} out_syncs\n", out_syncs.len());
         for sync in out_syncs {
             sync.syncobj.replace_fence(Some(&out_fence));
         }
 
-        todo!();
+        Ok(())
     }
 }
 
