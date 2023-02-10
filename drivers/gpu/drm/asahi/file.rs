@@ -182,26 +182,47 @@ impl File {
             return Err(EINVAL);
         }
 
-        let params = bindings::drm_asahi_params_global {
+        let mut params = bindings::drm_asahi_params_global {
             unstable_uabi_version: bindings::DRM_ASAHI_UNSTABLE_UABI_VERSION,
             pad0: 0,
+
             feat_compat: gpu.get_cfg().gpu_feat_compat,
             feat_incompat: gpu.get_cfg().gpu_feat_incompat,
+
             gpu_generation: gpu.get_dyncfg().id.gpu_gen as u32,
             gpu_variant: gpu.get_dyncfg().id.gpu_variant as u32,
             gpu_revision: gpu.get_dyncfg().id.gpu_rev as u32,
             chip_id: gpu.get_cfg().chip_id,
+
+            num_dies: gpu.get_dyncfg().id.max_dies,
+            num_clusters_total: gpu.get_dyncfg().id.num_clusters,
+            num_cores_per_cluster: gpu.get_dyncfg().id.num_cores,
+            num_frags_per_cluster: gpu.get_dyncfg().id.num_frags,
+            num_gps_per_cluster: gpu.get_dyncfg().id.num_gps,
+            num_cores_total_active: gpu.get_dyncfg().id.total_active_cores,
+            core_masks: [0; bindings::DRM_ASAHI_MAX_CLUSTERS as usize],
+
             vm_page_size: mmu::UAT_PGSZ as u32,
             pad1: 0,
             vm_user_start: VM_USER_START,
             vm_user_end: VM_USER_END,
             vm_shader_start: VM_SHADER_START,
             vm_shader_end: VM_SHADER_END,
+
             max_syncs_per_submission: MAX_SYNCS_PER_SUBMISSION,
             max_commands_per_submission: MAX_COMMANDS_PER_SUBMISSION,
             max_commands_in_flight: MAX_COMMANDS_IN_FLIGHT,
             max_attachments: crate::microseq::MAX_ATTACHMENTS as u32,
+
+            timer_frequency_hz: gpu.get_cfg().base_clock_hz,
+            min_frequency_khz: gpu.get_dyncfg().pwr.min_frequency_khz(),
+            max_frequency_khz: gpu.get_dyncfg().pwr.max_frequency_khz(),
+            max_power_mw: gpu.get_dyncfg().pwr.max_power_mw,
         };
+
+        for (i, mask) in gpu.get_dyncfg().id.core_masks.iter().enumerate() {
+            *(params.core_masks.get_mut(i).ok_or(EIO)?) = (*mask).try_into()?;
+        }
 
         let size =
             core::mem::size_of::<bindings::drm_asahi_params_global>().min(data.size.try_into()?);

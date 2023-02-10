@@ -511,4 +511,12 @@ impl PwrConfig {
             power_zones,
         })
     }
+
+    pub(crate) fn min_frequency_khz(&self) -> u32{
+        self.perf_states[self.perf_base_pstate as usize].freq_hz / 1000
+    }
+
+    pub(crate) fn max_frequency_khz(&self) -> u32 {
+        self.perf_states[self.perf_max_pstate as usize].freq_hz / 1000
+    }
 }

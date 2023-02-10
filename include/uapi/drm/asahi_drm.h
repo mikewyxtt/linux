@@ -28,6 +28,8 @@ extern "C" {
 #define DRM_ASAHI_QUEUE_DESTROY			0x07
 #define DRM_ASAHI_SUBMIT			0x08
 
+#define DRM_ASAHI_MAX_CLUSTERS	32
+
 struct drm_asahi_params_global {
 	__u32 unstable_uabi_version;
 	__u32 pad0;
@@ -40,6 +42,14 @@ struct drm_asahi_params_global {
 	__u32 gpu_revision;
 	__u32 chip_id;
 
+	__u32 num_dies;
+	__u32 num_clusters_total;
+	__u32 num_cores_per_cluster;
+	__u32 num_frags_per_cluster;
+	__u32 num_gps_per_cluster;
+	__u32 num_cores_total_active;
+	__u64 core_masks[DRM_ASAHI_MAX_CLUSTERS];
+
 	__u32 vm_page_size;
 	__u32 pad1;
 	__u64 vm_user_start;
@@ -51,6 +61,11 @@ struct drm_asahi_params_global {
 	__u32 max_commands_per_submission;
 	__u32 max_commands_in_flight;
 	__u32 max_attachments;
+
+	__u32 timer_frequency_hz;
+	__u32 min_frequency_khz;
+	__u32 max_frequency_khz;
+	__u32 max_power_mw;
 };
 
 /*
