@@ -254,10 +254,19 @@ impl sched::JobImpl for QueueJob::ver {
         // Now we fully commit to running the job
         mod_dev_dbg!(job.dev, "QueueJob: Run fragment\n");
         frag_sub.map(|a| gpu.run_job(a)).transpose()?;
+
         mod_dev_dbg!(job.dev, "QueueJob: Run vertex\n");
         vtx_sub.map(|a| gpu.run_job(a)).transpose()?;
+
         mod_dev_dbg!(job.dev, "QueueJob: Run compute\n");
         comp_sub.map(|a| gpu.run_job(a)).transpose()?;
+
+        mod_dev_dbg!(job.dev, "QueueJob: Drop compute job\n");
+        core::mem::drop(comp_job);
+        mod_dev_dbg!(job.dev, "QueueJob: Drop vertex job\n");
+        core::mem::drop(vtx_job);
+        mod_dev_dbg!(job.dev, "QueueJob: Drop fragment job\n");
+        core::mem::drop(frag_job);
 
         Ok(Some(Fence::from_fence(&job.fence)))
     }

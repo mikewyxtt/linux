@@ -742,7 +742,11 @@ impl GpuManager::ver {
 
     /// Kick a submission pipe for a submitted job to tell the firmware to start processing it.
     pub(crate) fn run_job(&self, job: workqueue::JobSubmission::ver<'_>) -> Result {
+        mod_dev_dbg!(self.dev, "GPU: run_job\n");
+
         let pipe_type = job.pipe_type();
+        mod_dev_dbg!(self.dev, "GPU: run_job: pipe_type={:?}\n", pipe_type);
+
         let pipes = match pipe_type {
             PipeType::Vertex => &self.pipes.vtx,
             PipeType::Fragment => &self.pipes.frag,
@@ -752,7 +756,9 @@ impl GpuManager::ver {
         let index: usize = job.priority() as usize;
         let mut pipe = pipes.get(index).ok_or(EIO)?.lock();
 
+        mod_dev_dbg!(self.dev, "GPU: run_job: run()\n");
         job.run(&mut pipe);
+        mod_dev_dbg!(self.dev, "GPU: run_job: ring doorbell\n");
 
         let mut guard = self.rtkit.lock();
         let rtk = guard.as_mut().unwrap();
@@ -760,6 +766,7 @@ impl GpuManager::ver {
             EP_DOORBELL,
             MSG_TX_DOORBELL | pipe_type as u64 | ((index as u64) << 2),
         )?;
+        mod_dev_dbg!(self.dev, "GPU: run_job: done\n");
 
         Ok(())
     }

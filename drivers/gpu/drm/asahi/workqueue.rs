@@ -180,7 +180,7 @@ pub(crate) struct Job {
 
 #[versions(AGX)]
 pub(crate) struct JobSubmission<'a> {
-    inner: Guard<'a, Mutex<WorkQueueInner::ver>>,
+    inner: Option<Guard<'a, Mutex<WorkQueueInner::ver>>>,
     wptr: u32,
     event_count: usize,
     command_count: usize,
@@ -215,7 +215,7 @@ impl Job::ver {
         callback: impl FnOnce(O, Option<WorkError>) + Sync + Send + 'static,
     ) -> Result {
         if self.committed {
-            pr_err!("WorkQueue: Tried to mutate committed Job");
+            pr_err!("WorkQueue: Tried to mutate committed Job\n");
             return Err(EINVAL);
         }
 
@@ -235,12 +235,12 @@ impl Job::ver {
 
     pub(crate) fn commit(&mut self) -> Result {
         if self.committed {
-            pr_err!("WorkQueue: Tried to commit committed Job");
+            pr_err!("WorkQueue: Tried to commit committed Job\n");
             return Err(EINVAL);
         }
 
         if self.pending.is_empty() {
-            pr_err!("WorkQueue: Job::commit() with no commands");
+            pr_err!("WorkQueue: Job::commit() with no commands\n");
             return Err(EINVAL);
         }
 
@@ -249,7 +249,7 @@ impl Job::ver {
         let ev = inner.event.as_mut().expect("WorkQueue: Job lost its event");
 
         if ev.1 != self.start_value {
-            pr_err!("WorkQueue: Job::commit() out of order (event)");
+            pr_err!("WorkQueue: Job::commit() out of order (event)\n");
             return Err(EINVAL);
         }
 
@@ -266,34 +266,34 @@ impl Job::ver {
 
     pub(crate) fn submit(&mut self) -> Result<JobSubmission::ver<'_>> {
         if !self.committed {
-            pr_err!("WorkQueue: Tried to submit uncommitted Job");
+            pr_err!("WorkQueue: Tried to submit uncommitted Job\n");
             return Err(EINVAL);
         }
 
         if self.submitted {
-            pr_err!("WorkQueue: Tried to submit Job twice");
+            pr_err!("WorkQueue: Tried to submit Job twice\n");
             return Err(EINVAL);
         }
 
         if self.pending.is_empty() {
-            pr_err!("WorkQueue: Job::submit() with no commands");
+            pr_err!("WorkQueue: Job::submit() with no commands\n");
             return Err(EINVAL);
         }
 
         let mut inner = self.wq.inner.lock();
 
         if inner.submit_seq != self.event_info.cmd_seq {
-            pr_err!("WorkQueue: Job::submit() out of order (start_seq)");
+            pr_err!("WorkQueue: Job::submit() out of order (start_seq)\n");
             return Err(EINVAL);
         }
 
         if inner.commit_seq < (self.event_info.cmd_seq + self.pending.len() as u64) {
-            pr_err!("WorkQueue: Job::submit() out of order (commit_seq)");
+            pr_err!("WorkQueue: Job::submit() out of order (commit_seq)\n");
             return Err(EINVAL);
         }
 
         if self.wptr != inner.wptr {
-            pr_err!("WorkQueue: Job::submit() out of order (wptr)");
+            pr_err!("WorkQueue: Job::submit() out of order (wptr)\n");
             return Err(EINVAL);
         }
 
@@ -301,7 +301,7 @@ impl Job::ver {
         let command_count = self.pending.len();
 
         if inner.free_space() <= command_count {
-            pr_err!("WorkQueue: Job does not fit in ring buffer");
+            pr_err!("WorkQueue: Job does not fit in ring buffer\n");
             return Err(EBUSY);
         }
 
@@ -323,7 +323,7 @@ impl Job::ver {
         self.submitted = true;
 
         Ok(JobSubmission::ver {
-            inner,
+            inner: Some(inner),
             wptr,
             command_count,
             event_count: self.event_count,
@@ -334,49 +334,49 @@ impl Job::ver {
 #[versions(AGX)]
 impl<'a> JobSubmission::ver<'a> {
     pub(crate) fn run(mut self, channel: &mut channel::PipeChannel::ver) {
-        self.inner
+        let command_count = self.command_count;
+        let mut inner = self.inner.take().expect("No inner?");
+        let wptr = self.wptr;
+        core::mem::forget(self);
+
+        inner
             .info
             .state
-            .with(|raw, _inner| raw.cpu_wptr.store(self.wptr, Ordering::Release));
+            .with(|raw, _inner| raw.cpu_wptr.store(wptr, Ordering::Release));
 
-        self.inner.wptr = self.wptr;
+        inner.wptr = wptr;
 
-        let event = self
-            .inner
-            .event
-            .as_mut()
-            .expect("JobSubmission lost its event");
+        let event = inner.event.as_mut().expect("JobSubmission lost its event");
 
         let event_slot = event.0.slot();
 
         let msg = fw::channels::RunWorkQueueMsg::ver {
-            pipe_type: self.inner.pipe_type,
-            work_queue: Some(self.inner.info.weak_pointer()),
-            wptr: self.inner.wptr,
+            pipe_type: inner.pipe_type,
+            work_queue: Some(inner.info.weak_pointer()),
+            wptr: inner.wptr,
             event_slot,
-            is_new: self.inner.new,
+            is_new: inner.new,
             __pad: Default::default(),
         };
         channel.send(&msg);
-        self.inner.new = false;
+        inner.new = false;
 
-        self.inner.submit_seq += self.command_count as u64;
-
-        core::mem::forget(self);
+        inner.submit_seq += command_count as u64;
     }
 
     pub(crate) fn pipe_type(&self) -> PipeType {
-        self.inner.pipe_type
+        self.inner.as_ref().expect("No inner?").pipe_type
     }
 
     pub(crate) fn priority(&self) -> u32 {
-        self.inner.priority
+        self.inner.as_ref().expect("No inner?").priority
     }
 }
 
 #[versions(AGX)]
 impl Drop for Job::ver {
     fn drop(&mut self) {
+        mod_pr_debug!("WorkQueue: Dropping Job\n");
         let mut inner = self.wq.inner.lock();
 
         if self.committed && !self.submitted {
@@ -388,21 +388,26 @@ impl Drop for Job::ver {
         inner.pending_jobs -= 1;
 
         if inner.pending.is_empty() && inner.pending_jobs == 0 {
+            mod_pr_debug!("WorkQueue({:?}): Dropping event", inner.pipe_type);
             inner.event = None;
         }
+        mod_pr_debug!("WorkQueue({:?}): Dropped Job\n", inner.pipe_type);
     }
 }
 
 #[versions(AGX)]
 impl<'a> Drop for JobSubmission::ver<'a> {
     fn drop(&mut self) {
-        let inner = &mut self.inner;
+        let inner = self.inner.as_mut().expect("No inner?");
+        mod_pr_debug!("WorkQueue({:?}): Dropping JobSubmission\n", inner.pipe_type);
+
         let new_len = inner.pending.len() - self.command_count;
         inner.pending.truncate(new_len);
 
         let event = inner.event.as_mut().expect("JobSubmission lost its event");
         event.1.sub(self.event_count as u32);
         inner.commit_seq -= self.command_count as u64;
+        mod_pr_debug!("WorkQueue({:?}): Dropped JobSubmission\n", inner.pipe_type);
     }
 }
 
