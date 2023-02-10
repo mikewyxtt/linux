@@ -274,7 +274,7 @@ impl rtkit::Operations for GpuManager::ver {
         let dev = &data.dev;
         dev_err!(dev, "GPU firmware crashed, failing all jobs\n");
 
-        data.crashed.store(false, Ordering::Relaxed);
+        data.crashed.store(true, Ordering::Relaxed);
         data.event_manager.fail_all(workqueue::WorkError::NoDevice);
     }
 
