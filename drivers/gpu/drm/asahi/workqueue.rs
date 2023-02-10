@@ -25,7 +25,7 @@ use core::sync::atomic::Ordering;
 use kernel::{
     bindings,
     prelude::*,
-    sync::{smutex::Mutex, Arc, Guard, UniqueArc},
+    sync::{Arc, Guard, Mutex, UniqueArc},
     Opaque,
 };
 
@@ -490,10 +490,21 @@ impl WorkQueue::ver {
             submit_seq: 0,
         };
 
-        Arc::try_new(Self {
+        let mut queue = Pin::from(UniqueArc::try_new(Self {
             info_pointer: inner.info.weak_pointer(),
-            inner: Mutex::new(inner),
-        })
+            // SAFETY: `mutex_init!` is called below.
+            inner: unsafe { Mutex::new(inner) },
+        })?);
+
+        // SAFETY: `inner` is pinned when `queue` is.
+        let pinned = unsafe { queue.as_mut().map_unchecked_mut(|s| &mut s.inner) };
+        match pipe_type {
+            PipeType::Vertex => kernel::mutex_init!(pinned, "WorkQueue::inner (Vertex)"),
+            PipeType::Fragment => kernel::mutex_init!(pinned, "WorkQueue::inner (Fragment)"),
+            PipeType::Compute => kernel::mutex_init!(pinned, "WorkQueue::inner (Compute)"),
+        }
+
+        Ok(queue.into())
     }
 
     /// Returns the QueueInfo pointer for this workqueue, as a weak pointer.

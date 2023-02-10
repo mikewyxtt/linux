@@ -512,7 +512,7 @@ impl PwrConfig {
         })
     }
 
-    pub(crate) fn min_frequency_khz(&self) -> u32{
+    pub(crate) fn min_frequency_khz(&self) -> u32 {
         self.perf_states[self.perf_base_pstate as usize].freq_hz / 1000
     }
 
