@@ -400,17 +400,17 @@ impl<'a> InitDataBuilder::ver<'a> {
                     raw::HwDataB::ver {
                         // Userspace VA map related
                         #[ver(V < V13_0B4)]
-                        unk_0: 0x13_00000000,
-                        unk_8: 0x14_00000000,
+                        unk_0: U64(0x13_00000000),
+                        unk_8: U64(0x14_00000000),
                         #[ver(V < V13_0B4)]
-                        unk_10: 0x1_00000000,
-                        unk_18: 0xffc00000,
-                        unk_20: 0x11_00000000,
-                        unk_28: 0x11_00000000,
+                        unk_10: U64(0x1_00000000),
+                        unk_18: U64(0xffc00000),
+                        unk_20: U64(0x11_00000000),
+                        unk_28: U64(0x11_00000000),
                         // userspace address?
-                        unk_30: 0x6f_ffff8000,
+                        unk_30: U64(0x6f_ffff8000),
                         // unmapped?
-                        unkptr_38: 0xffffffa0_11800000,
+                        unkptr_38: U64(0xffffffa0_11800000),
                         // TODO: yuv matrices
                         chip_id: self.cfg.chip_id,
                         unk_454: 0x1,
@@ -427,7 +427,7 @@ impl<'a> InitDataBuilder::ver<'a> {
                         unk_4a0: 0x1,
                         unk_4a4: 0x1,
                         unk_4c0: 0x1f,
-                        unk_4e0: self.cfg.db.unk_4e0,
+                        unk_4e0: U64(self.cfg.db.unk_4e0),
                         unk_4f0: 0x1,
                         unk_4f4: 0x1,
                         unk_504: 0x31,
@@ -435,7 +435,7 @@ impl<'a> InitDataBuilder::ver<'a> {
                         unk_534: self.cfg.db.unk_534,
                         num_frags: self.dyncfg.id.num_frags * self.dyncfg.id.num_clusters,
                         unk_554: 0x1,
-                        uat_ttb_base: self.dyncfg.uat_ttb_base,
+                        uat_ttb_base: U64(self.dyncfg.uat_ttb_base),
                         gpu_core_id: self.cfg.gpu_core as u32,
                         gpu_rev_id: self.dyncfg.id.gpu_rev_id as u32,
                         num_cores: self.dyncfg.id.num_cores * self.dyncfg.id.num_clusters,
@@ -531,8 +531,8 @@ impl<'a> InitDataBuilder::ver<'a> {
                             unk_54: 0xffff,
                             unk_56: 40,
                             unk_58: 0xffff,
-                            unk_5e: 1,
-                            unk_66: 1,
+                            unk_5e: U32(1),
+                            unk_66: U32(1),
                             ..Default::default()
                         },
                         unk_8900: 1,
@@ -686,8 +686,8 @@ impl<'a> InitDataBuilder::ver<'a> {
                     buffer_mgr_ctl_2: inner.buffer_mgr_ctl.gpu_pointer(),
 
                     __pad0: Default::default(),
-                    unk_160: 0,
-                    unk_168: 0,
+                    unk_160: U64(0),
+                    unk_168: U64(0),
                     unk_1d0: 0,
                     unk_1d4: 0,
                     unk_1d8: Default::default(),
@@ -725,9 +725,9 @@ impl<'a> InitDataBuilder::ver<'a> {
             unk_3: 8,
             unk_4: 0x4000,
             num_entries: num_entries as _,
-            unk_8: 1,
-            unk_10: ((1u64 << cfg.uat_oas) - 1) & !(mmu::UAT_PGMSK as u64),
-            index_mask: ((num_entries - 1) << index_shift) as u64,
+            unk_8: U64(1),
+            unk_10: U64(((1u64 << cfg.uat_oas) - 1) & !(mmu::UAT_PGMSK as u64)),
+            index_mask: U64(((num_entries - 1) << index_shift) as u64),
         }
     }
 

@@ -29,6 +29,7 @@ use crate::box_in_place;
 use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::fw::channels::PipeType;
+use crate::fw::types::U64;
 use crate::{
     alloc, buffer, channel, event, fw, gem, hw, initdata, mem, mmu, queue, regs, workqueue,
 };
@@ -636,11 +637,11 @@ impl GpuManager::ver {
 
         self.initdata.runtime_pointers.hwdata_b.with_mut(|raw, _| {
             raw.io_mappings[index] = fw::initdata::raw::IOMapping {
-                phys_addr: map.base as u64,
-                virt_addr: (mapping.iova() + off) as u64,
+                phys_addr: U64(map.base as u64),
+                virt_addr: U64((mapping.iova() + off) as u64),
                 size: map.size as u32,
                 range_size: map.range_size as u32,
-                readwrite: map.writable as u64,
+                readwrite: U64(map.writable as u64),
             };
         });
 

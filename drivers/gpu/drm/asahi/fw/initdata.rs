@@ -540,11 +540,11 @@ pub(crate) mod raw {
     #[derive(Debug, Default, Clone, Copy)]
     #[repr(C)]
     pub(crate) struct IOMapping {
-        pub(crate) phys_addr: u64,
-        pub(crate) virt_addr: u64,
+        pub(crate) phys_addr: U64,
+        pub(crate) virt_addr: U64,
         pub(crate) size: u32,
         pub(crate) range_size: u32,
-        pub(crate) readwrite: u64,
+        pub(crate) readwrite: U64,
     }
 
     #[versions(AGX)]
@@ -552,18 +552,18 @@ pub(crate) mod raw {
     #[repr(C)]
     pub(crate) struct HwDataB {
         #[ver(V < V13_0B4)]
-        pub(crate) unk_0: u64,
+        pub(crate) unk_0: U64,
 
-        pub(crate) unk_8: u64,
+        pub(crate) unk_8: U64,
 
         #[ver(V < V13_0B4)]
-        pub(crate) unk_10: u64,
+        pub(crate) unk_10: U64,
 
-        pub(crate) unk_18: u64,
-        pub(crate) unk_20: u64,
-        pub(crate) unk_28: u64,
-        pub(crate) unk_30: u64,
-        pub(crate) unkptr_38: u64,
+        pub(crate) unk_18: U64,
+        pub(crate) unk_20: U64,
+        pub(crate) unk_28: U64,
+        pub(crate) unk_30: U64,
+        pub(crate) unkptr_38: U64,
         pub(crate) pad_40: Pad<0x20>,
 
         #[ver(V < V13_0B4)]
@@ -613,7 +613,7 @@ pub(crate) mod raw {
         pub(crate) unk_4d4: u32,
         pub(crate) unk_4d8: Array<0x4, u8>,
         pub(crate) unk_4dc: u32,
-        pub(crate) unk_4e0: u64,
+        pub(crate) unk_4e0: U64,
         pub(crate) unk_4e8: u32,
         pub(crate) unk_4ec: u32,
         pub(crate) unk_4f0: u32,
@@ -650,7 +650,7 @@ pub(crate) mod raw {
         pub(crate) unk_54c: u32,
         pub(crate) unk_550: u32,
         pub(crate) unk_554: u32,
-        pub(crate) uat_ttb_base: u64,
+        pub(crate) uat_ttb_base: U64,
         pub(crate) gpu_core_id: u32,
         pub(crate) gpu_rev_id: u32,
         pub(crate) num_cores: u32,
@@ -726,7 +726,7 @@ pub(crate) mod raw {
     pub(crate) struct GpuQueueStatsVtx {
         pub(crate) busy: u32,
         pub(crate) unk_4: u32,
-        pub(crate) cur_cmdqueue: u64,
+        pub(crate) cur_cmdqueue: U64,
         pub(crate) cur_count: u32,
         pub(crate) unk_14: u32,
     }
@@ -740,7 +740,7 @@ pub(crate) mod raw {
         pub(crate) unk_68: Array<0x8, u8>,
         pub(crate) unk_70: u32,
         pub(crate) unk_74: u32,
-        pub(crate) unk_timestamp: u64,
+        pub(crate) unk_timestamp: U64,
         pub(crate) unk_80: Array<0x40, u8>,
     }
 
@@ -748,7 +748,7 @@ pub(crate) mod raw {
     #[repr(C, packed)]
     pub(crate) struct GpuQueueStatsFrag {
         pub(crate) busy: u32,
-        pub(crate) cur_cmdqueue: u64,
+        pub(crate) cur_cmdqueue: U64,
         pub(crate) unk_c: u32,
         pub(crate) unk_10: u32,
         pub(crate) unk_14: Array<0x14, u8>,
@@ -773,7 +773,7 @@ pub(crate) mod raw {
         pub(crate) unk_124: u32,
         pub(crate) unk_128: u32,
         pub(crate) unk_12c: u32,
-        pub(crate) unk_timestamp: u64,
+        pub(crate) unk_timestamp: U64,
         pub(crate) unk_134: Array<0x8c, u8>,
     }
     #[versions(AGX)]
@@ -864,8 +864,8 @@ pub(crate) mod raw {
         pub(crate) stats: ChannelRing<channels::ChannelState, channels::RawStatsMsg::ver>,
 
         pub(crate) __pad0: Pad<0x50>,
-        pub(crate) unk_160: u64,
-        pub(crate) unk_168: u64,
+        pub(crate) unk_160: U64,
+        pub(crate) unk_168: U64,
         pub(crate) stats_vtx: GpuPointer<'a, super::GpuGlobalStatsVtx::ver>,
         pub(crate) stats_frag: GpuPointer<'a, super::GpuGlobalStatsFrag::ver>,
         pub(crate) stats_comp: GpuPointer<'a, super::GpuStatsComp>,
@@ -916,14 +916,14 @@ pub(crate) mod raw {
         pub(crate) unk_54: u16,
         pub(crate) unk_56: u16,
         pub(crate) unk_58: u16,
-        pub(crate) unk_5a: u32,
-        pub(crate) unk_5e: u32,
-        pub(crate) unk_62: u32,
+        pub(crate) unk_5a: U32,
+        pub(crate) unk_5e: U32,
+        pub(crate) unk_62: U32,
 
         #[ver(V >= V13_0B4)]
         pub(crate) unk_66_0: Array<0xc, u8>,
 
-        pub(crate) unk_66: u32,
+        pub(crate) unk_66: U32,
         pub(crate) unk_6a: Array<0x16, u8>,
     }
     #[versions(AGX)]
@@ -1042,8 +1042,8 @@ pub(crate) mod raw {
         pub(crate) fault_control: u32,
         pub(crate) do_init: u32,
         pub(crate) unk_10e88: Array<0x188, u8>,
-        pub(crate) idle_ts: u64,
-        pub(crate) idle_unk: u64,
+        pub(crate) idle_ts: U64,
+        pub(crate) idle_unk: U64,
         pub(crate) unk_11020: u32,
         pub(crate) unk_11024: u32,
         pub(crate) unk_11028: u32,
@@ -1110,9 +1110,9 @@ pub(crate) mod raw {
         pub(crate) index_shift: u8,
         pub(crate) num_entries: u16,
         pub(crate) unk_4: u16,
-        pub(crate) unk_8: u64,
-        pub(crate) unk_10: u64,
-        pub(crate) index_mask: u64,
+        pub(crate) unk_8: U64,
+        pub(crate) unk_10: U64,
+        pub(crate) index_mask: U64,
     }
 
     #[versions(AGX)]
