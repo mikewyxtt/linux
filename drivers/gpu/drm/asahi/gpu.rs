@@ -12,7 +12,7 @@
 //! itself with version dependence.
 
 use core::any::Any;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use core::time::Duration;
 
 use kernel::{
@@ -169,6 +169,7 @@ pub(crate) struct GpuManager {
     dyncfg: Box<hw::DynConfig>,
     pub(crate) initdata: Box<fw::types::GpuObject<fw::initdata::InitData::ver>>,
     uat: Box<mmu::Uat>,
+    crashed: AtomicBool,
     alloc: Mutex<KernelAllocators>,
     io_mappings: Vec<mmu::Mapping>,
     rtkit: Mutex<Option<Box<rtkit::RTKit<GpuManager::ver>>>>,
@@ -266,6 +267,14 @@ impl rtkit::Operations for GpuManager::ver {
         ch.ktrace.poll();
         ch.stats.poll();
         ch.event.poll();
+    }
+
+    fn crashed(data: <Self::Data as PointerWrapper>::Borrowed<'_>) {
+        let dev = &data.dev;
+        dev_err!(dev, "GPU firmware crashed, failing all jobs\n");
+
+        data.crashed.store(false, Ordering::Relaxed);
+        data.event_manager.fail_all(workqueue::WorkError::NoDevice);
     }
 
     fn shmem_alloc(
@@ -489,6 +498,7 @@ impl GpuManager::ver {
             uat,
             io_mappings: Vec::new(),
             rtkit: Mutex::new(None),
+            crashed: AtomicBool::new(false),
             rx_channels: Mutex::new(box_in_place!(RxChannels::ver {
                 event: channel::EventChannel::new(dev, &mut alloc, event_manager.clone())?,
                 fw_log: channel::FwLogChannel::new(dev, &mut alloc)?,
@@ -752,6 +762,10 @@ impl GpuManager::ver {
 
         Ok(())
     }
+
+    pub(crate) fn is_crashed(&self) -> bool {
+        self.crashed.load(Ordering::Relaxed)
+    }
 }
 
 #[versions(AGX)]
@@ -846,6 +860,10 @@ impl GpuManager for GpuManager::ver {
     }
 
     fn kick_firmware(&self) -> Result {
+        if self.is_crashed() {
+            return Err(ENODEV);
+        }
+
         let mut guard = self.rtkit.lock();
         let rtk = guard.as_mut().unwrap();
         rtk.send_message(EP_DOORBELL, MSG_TX_DOORBELL | DOORBELL_KICKFW)?;
@@ -862,6 +880,10 @@ impl GpuManager for GpuManager::ver {
             "Invalidating GPU context @ {:?}\n",
             context.weak_pointer()
         );
+
+        if self.is_crashed() {
+            return Err(ENODEV);
+        }
 
         let mut guard = self.alloc.lock();
         let (garbage_count, _) = guard.private.garbage();
@@ -911,6 +933,10 @@ impl GpuManager for GpuManager::ver {
 
     fn flush_fw_cache(&self) -> Result {
         mod_dev_dbg!(self.dev, "Flushing coprocessor data cache\n");
+
+        if self.is_crashed() {
+            return Err(ENODEV);
+        }
 
         // ctx_0 == 0xff or ctx_1 == 0xff cause no effect on context,
         // but this command does a full cache flush too, so abuse it
@@ -992,6 +1018,10 @@ impl GpuManager for GpuManager::ver {
     }
 
     fn fwctl(&self, msg: fw::channels::FwCtlMsg) -> Result {
+        if self.is_crashed() {
+            return Err(ENODEV);
+        }
+
         let mut fwctl = self.fwctl_channel.lock();
         let token = fwctl.send(&msg);
         {
@@ -1012,6 +1042,10 @@ impl GpuManager for GpuManager::ver {
     }
 
     fn start_op(&self) -> Result<OpGuard<'_>> {
+        if self.is_crashed() {
+            return Err(ENODEV);
+        }
+
         let val = self
             .initdata
             .globals

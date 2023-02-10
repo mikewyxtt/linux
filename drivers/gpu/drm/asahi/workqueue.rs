@@ -38,10 +38,12 @@ pub(crate) enum WorkError {
     Timeout,
     /// GPU MMU fault (invalid access).
     Fault(regs::FaultInfo),
-    /// Unknown reason.
-    Unknown,
     /// Work failed due to an error caused by other concurrent GPU work.
     Killed,
+    /// The GPU crashed.
+    NoDevice,
+    /// Unknown reason.
+    Unknown,
 }
 
 impl From<WorkError> for kernel::error::Error {
@@ -52,6 +54,7 @@ impl From<WorkError> for kernel::error::Error {
             WorkError::Fault(_) => EIO,
             WorkError::Unknown => ENODATA,
             WorkError::Killed => ECANCELED,
+            WorkError::NoDevice => ENODEV,
         }
     }
 }
@@ -73,7 +76,7 @@ trait GenSubmittedWork: Send + Sync {
     fn gpu_va(&self) -> NonZeroU64;
     fn value(&self) -> event::EventValue;
     fn wptr(&self) -> u32;
-    fn mark_error(&mut self, value: event::EventValue, error: WorkError) -> bool;
+    fn mark_error(&mut self, error: WorkError);
     fn complete(self: Box<Self>);
 }
 
@@ -105,17 +108,12 @@ impl<O: OpaqueGpuObject, C: FnOnce(O, Option<WorkError>) + Send + Sync> GenSubmi
         callback(object, error);
     }
 
-    fn mark_error(&mut self, value: event::EventValue, error: WorkError) -> bool {
-        if self.value <= value {
-            mod_pr_debug!("WorkQueue: Command at value {:#x?} failed", self.value,);
-            self.error = Some(match error {
-                WorkError::Fault(info) if info.vm_slot != self.vm_slot => WorkError::Killed,
-                err => err,
-            });
-            true
-        } else {
-            false
-        }
+    fn mark_error(&mut self, error: WorkError) {
+        mod_pr_debug!("WorkQueue: Command at value {:#x?} failed\n", self.value);
+        self.error = Some(match error {
+            WorkError::Fault(info) if info.vm_slot != self.vm_slot => WorkError::Killed,
+            err => err,
+        });
     }
 }
 
@@ -566,6 +564,7 @@ impl WorkQueue::ver {
 pub(crate) trait WorkQueue {
     fn signal(&self) -> bool;
     fn mark_error(&self, value: event::EventValue, error: WorkError);
+    fn fail_all(&self, error: WorkError);
 }
 
 #[versions(AGX)]
@@ -681,9 +680,46 @@ impl WorkQueue for WorkQueue::ver {
         );
 
         for cmd in inner.pending.iter_mut() {
-            if !cmd.mark_error(value, error) {
+            if cmd.value() <= value {
+                cmd.mark_error(error);
+            } else {
                 break;
             }
+        }
+    }
+
+    /// Mark all of this queue's work as having failed, and complete it.
+    fn fail_all(&self, error: WorkError) {
+        // If anything is marked completed, we can consider it successful
+        // at this point, even if we didn't get the signal event yet.
+        self.signal();
+
+        let mut inner = self.inner.lock();
+
+        if inner.event.is_none() {
+            pr_err!("WorkQueue: fail_all() called but no event?");
+            return;
+        }
+
+        mod_pr_debug!(
+            "WorkQueue({:?}): Failing all jobs {:?}",
+            inner.pipe_type,
+            error
+        );
+
+        let mut cmds = Vec::new();
+
+        core::mem::swap(&mut inner.pending, &mut cmds);
+
+        if inner.pending_jobs == 0 {
+            inner.event = None;
+        }
+
+        core::mem::drop(inner);
+
+        for mut cmd in cmds {
+            cmd.mark_error(error);
+            cmd.complete();
         }
     }
 }

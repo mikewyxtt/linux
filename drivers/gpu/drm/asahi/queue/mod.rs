@@ -423,6 +423,11 @@ impl Queue for Queue::ver {
 
         mod_dev_dbg!(self.dev, "Queue: Submit job\n");
 
+        if gpu.is_crashed() {
+            dev_err!(self.dev, "GPU is crashed, cannot submit\n");
+            return Err(ENODEV);
+        }
+
         let mut events: [Vec<Option<workqueue::QueueEventInfo::ver>>; SQ_COUNT] =
             Default::default();
 

@@ -212,4 +212,15 @@ impl EventManager {
             }
         }
     }
+
+    /// Fail all commands, used when the GPU crashes.
+    pub(crate) fn fail_all(&self, error: workqueue::WorkError) {
+        self.alloc.with_inner(|inner| {
+            inner.owners.iter().for_each(|o| {
+                if let Some(o) = o.as_ref() {
+                    o.fail_all(error)
+                }
+            });
+        });
+    }
 }
