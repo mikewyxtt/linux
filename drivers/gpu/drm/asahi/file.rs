@@ -313,11 +313,20 @@ impl File {
             data.size
         );
 
-        if data.extensions != 0 || (data.flags & !bindings::ASAHI_GEM_WRITEBACK) != 0 {
+        if data.extensions != 0
+            || (data.flags & !(bindings::ASAHI_GEM_WRITEBACK | bindings::ASAHI_GEM_VM_PRIVATE)) != 0
+            || (data.flags & bindings::ASAHI_GEM_VM_PRIVATE == 0 && data.vm_id != 0)
+        {
             return Err(EINVAL);
         }
 
-        let bo = gem::new_object(device, data.size.try_into()?, data.flags)?;
+        let vm_id = if data.flags & bindings::ASAHI_GEM_VM_PRIVATE != 0 {
+            Some(file.vms.get(data.vm_id.try_into()?).ok_or(ENOENT)?.vm.id())
+        } else {
+            None
+        };
+
+        let bo = gem::new_object(device, data.size.try_into()?, data.flags, vm_id)?;
 
         let handle = bo.gem.create_handle(file)?;
         data.handle = handle;

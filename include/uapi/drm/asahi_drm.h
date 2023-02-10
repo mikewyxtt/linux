@@ -102,6 +102,7 @@ struct drm_asahi_vm_destroy {
 };
 
 #define ASAHI_GEM_WRITEBACK	(1L << 0)
+#define ASAHI_GEM_VM_PRIVATE	(1L << 1)
 
 struct drm_asahi_gem_create {
 	/** @extensions: Pointer to the first extension struct, if any */
@@ -113,7 +114,10 @@ struct drm_asahi_gem_create {
 	/** @flags: BO creation flags */
 	__u32 flags;
 
-	/** @handle: Returned GEM handle for the BO. */
+	/** @handle: VM ID to assign to the BO, if ASAHI_GEM_VM_PRIVATE is set. */
+	__u32 vm_id;
+
+	/** @handle: Returned GEM handle for the BO */
 	__u32 handle;
 };
 

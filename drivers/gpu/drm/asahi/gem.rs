@@ -30,6 +30,8 @@ pub(crate) struct DriverObject {
     kernel: bool,
     /// Object creation flags.
     flags: u32,
+    /// VM ID for VM-private objects.
+    vm_id: Option<u64>,
     /// Locked list of mapping tuples: (file_id, vm_id, mapping)
     mappings: Mutex<Vec<(u64, u64, crate::mmu::Mapping)>>,
 }
@@ -113,6 +115,11 @@ impl ObjectRef {
     /// Returns Err(EBUSY) if there is already a mapping.
     pub(crate) fn map_into(&mut self, vm: &crate::mmu::Vm) -> Result<usize> {
         let vm_id = vm.id();
+
+        if self.gem.vm_id.is_some() && self.gem.vm_id != Some(vm_id) {
+            return Err(EINVAL);
+        }
+
         let mut mappings = self.gem.mappings.lock();
         for (_mapped_fid, mapped_vmid, _mapping) in mappings.iter() {
             if *mapped_vmid == vm_id {
@@ -141,6 +148,11 @@ impl ObjectRef {
         guard: bool,
     ) -> Result<usize> {
         let vm_id = vm.id();
+
+        if self.gem.vm_id.is_some() && self.gem.vm_id != Some(vm_id) {
+            return Err(EINVAL);
+        }
+
         let mut mappings = self.gem.mappings.lock();
         for (_mapped_fid, mapped_vmid, _mapping) in mappings.iter() {
             if *mapped_vmid == vm_id {
@@ -169,6 +181,11 @@ impl ObjectRef {
         guard: bool,
     ) -> Result {
         let vm_id = vm.id();
+
+        if self.gem.vm_id.is_some() && self.gem.vm_id != Some(vm_id) {
+            return Err(EINVAL);
+        }
+
         let mut mappings = self.gem.mappings.lock();
         for (_mapped_fid, mapped_vmid, _mapping) in mappings.iter() {
             if *mapped_vmid == vm_id {
@@ -197,15 +214,24 @@ pub(crate) fn new_kernel_object(dev: &AsahiDevice, size: usize) -> Result<Object
     gem.kernel = true;
     gem.flags = 0;
 
+    gem.set_exportable(false);
+
     Ok(ObjectRef::new(gem.into_ref()))
 }
 
 /// Create a new user-owned GEM object with the given flags.
-pub(crate) fn new_object(dev: &AsahiDevice, size: usize, flags: u32) -> Result<ObjectRef> {
+pub(crate) fn new_object(
+    dev: &AsahiDevice,
+    size: usize,
+    flags: u32,
+    vm_id: Option<u64>,
+) -> Result<ObjectRef> {
     let mut gem = shmem::Object::<DriverObject>::new(dev, size)?;
     gem.kernel = false;
     gem.flags = flags;
+    gem.vm_id = vm_id;
 
+    gem.set_exportable(vm_id.is_none());
     gem.set_wc(flags & bindings::ASAHI_GEM_WRITEBACK == 0);
 
     Ok(ObjectRef::new(gem.into_ref()))
@@ -223,6 +249,7 @@ impl gem::BaseDriverObject<Object> for DriverObject {
         Ok(DriverObject {
             kernel: false,
             flags: 0,
+            vm_id: None,
             mappings: Mutex::new(Vec::new()),
         })
     }
