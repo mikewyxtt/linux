@@ -22,6 +22,7 @@
 #include <linux/build_bug.h>
 #include <linux/device.h>
 #include <linux/err.h>
+#include <linux/mutex.h>
 #include <linux/refcount.h>
 #include <linux/xarray.h>
 
@@ -114,6 +115,22 @@ const char *rust_helper_dev_name(const struct device *dev)
 	return dev_name(dev);
 }
 EXPORT_SYMBOL_GPL(rust_helper_dev_name);
+
+#ifdef mutex_lock
+void rust_helper_mutex_lock(struct mutex *lock)
+{
+	return mutex_lock(lock);
+}
+EXPORT_SYMBOL_GPL(rust_helper_mutex_lock);
+#endif
+
+#ifdef mutex_unlock
+void rust_helper_mutex_unlock(struct mutex *lock)
+{
+	return mutex_unlock(lock);
+}
+EXPORT_SYMBOL_GPL(rust_helper_mutex_unlock);
+#endif
 
 /*
  * We use `bindgen`'s `--size_t-is-usize` option to bind the C `size_t` type
