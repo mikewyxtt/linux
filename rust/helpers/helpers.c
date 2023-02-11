@@ -12,6 +12,7 @@
 #include "build_assert.c"
 #include "build_bug.c"
 #include "device.c"
+#include "dma-fence.c"
 #include "err.c"
 #include "iomem.c"
 #include "ioport.c"
