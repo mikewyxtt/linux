@@ -19,6 +19,7 @@
 #include "err.c"
 #include "iomem.c"
 #include "ioport.c"
+#include "jiffies.c"
 #include "kunit.c"
 #include "lockdep.c"
 #include "mutex.c"
