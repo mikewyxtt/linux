@@ -30,7 +30,14 @@ struct Vm {
     ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
     ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
     vm: mmu::Vm,
-    _dummy_obj: gem::ObjectRef,
+    dummy_obj: gem::ObjectRef,
+}
+
+impl Drop for Vm {
+    fn drop(&mut self) {
+        // Mappings create a reference loop, make sure to break it.
+        self.dummy_obj.drop_vm_mappings(self.vm.id());
+    }
 }
 
 /// Sync object from userspace.
@@ -296,7 +303,7 @@ impl File {
             ualloc,
             ualloc_priv,
             vm,
-            _dummy_obj: dummy_obj,
+            dummy_obj,
         })?)?;
 
         data.vm_id = id;
