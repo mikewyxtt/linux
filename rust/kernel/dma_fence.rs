@@ -355,9 +355,17 @@ impl<T: FenceOps> RawDmaFence for UniqueFence<T> {
 
 impl<T: FenceOps> From<UniqueFence<T>> for UserFence<T> {
     fn from(value: UniqueFence<T>) -> Self {
-        let UniqueFence(ptr) = value;
+        let ptr = value.0;
+        core::mem::forget(value);
 
         UserFence(ptr)
+    }
+}
+
+impl<T: FenceOps> Drop for UniqueFence<T> {
+    fn drop(&mut self) {
+        // SAFETY: We own a reference to this fence.
+        unsafe { bindings::dma_fence_put(self.raw()) };
     }
 }
 
@@ -389,6 +397,13 @@ impl<T: FenceOps> crate::private::Sealed for UserFence<T> {}
 impl<T: FenceOps> RawDmaFence for UserFence<T> {
     fn raw(&self) -> *mut bindings::dma_fence {
         unsafe { addr_of_mut!((*self.0).fence) }
+    }
+}
+
+impl<T: FenceOps> Drop for UserFence<T> {
+    fn drop(&mut self) {
+        // SAFETY: We own a reference to this fence.
+        unsafe { bindings::dma_fence_put(self.raw()) };
     }
 }
 
