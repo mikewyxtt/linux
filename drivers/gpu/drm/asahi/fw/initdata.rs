@@ -17,13 +17,15 @@ pub(crate) mod raw {
     }
 
     #[versions(AGX)]
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct PipeChannels {
         pub(crate) vtx: ChannelRing<channels::ChannelState, channels::PipeMsg::ver>,
         pub(crate) frag: ChannelRing<channels::ChannelState, channels::PipeMsg::ver>,
         pub(crate) comp: ChannelRing<channels::ChannelState, channels::PipeMsg::ver>,
     }
+    #[versions(AGX)]
+    default_zeroed!(PipeChannels::ver);
 
     #[derive(Debug, Default)]
     #[repr(C)]
@@ -721,7 +723,7 @@ pub(crate) mod raw {
     #[versions(AGX)]
     default_zeroed!(HwDataB::ver);
 
-    #[derive(Debug, Default, Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C, packed)]
     pub(crate) struct GpuQueueStatsVtx {
         pub(crate) busy: u32,
@@ -730,6 +732,7 @@ pub(crate) mod raw {
         pub(crate) cur_count: u32,
         pub(crate) unk_14: u32,
     }
+    default_zeroed!(GpuQueueStatsVtx);
 
     #[versions(AGX)]
     #[derive(Debug, Default, Clone, Copy)]

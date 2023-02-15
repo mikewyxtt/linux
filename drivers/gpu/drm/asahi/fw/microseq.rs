@@ -4,6 +4,7 @@
 
 use super::types::*;
 use super::{buffer, compute, fragment, initdata, vertex, workqueue};
+use crate::default_zeroed;
 
 pub(crate) trait Operation {}
 
@@ -32,7 +33,7 @@ pub(crate) enum Pipe {
 
 pub(crate) const MAX_ATTACHMENTS: usize = 16;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Attachment {
     pub(crate) address: U64,
@@ -40,6 +41,7 @@ pub(crate) struct Attachment {
     pub(crate) unk_c: u16,
     pub(crate) unk_e: u16,
 }
+default_zeroed!(Attachment);
 
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]

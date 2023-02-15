@@ -77,6 +77,15 @@ impl fmt::Debug for U32 {
     }
 }
 
+unsafe impl Zeroed for u8 {}
+unsafe impl Zeroed for u16 {}
+unsafe impl Zeroed for u32 {}
+unsafe impl Zeroed for u64 {}
+unsafe impl Zeroed for i8 {}
+unsafe impl Zeroed for i16 {}
+unsafe impl Zeroed for i32 {}
+unsafe impl Zeroed for i64 {}
+
 /// Create a dummy `Debug` implementation, for when we need it but it's too painful to write by
 /// hand or not very useful.
 #[macro_export]
@@ -167,9 +176,9 @@ impl<const N: usize, T> Array<N, T> {
 // SAFETY: Arrays of Zeroed values can be safely Zeroed.
 unsafe impl<const N: usize, T: Zeroed> Zeroed for Array<N, T> {}
 
-impl<const N: usize, T: Default> Default for Array<N, T> {
+impl<const N: usize, T: Zeroed> Default for Array<N, T> {
     fn default() -> Self {
-        Self(core::array::from_fn(|_i| Default::default()))
+        Zeroed::zeroed()
     }
 }
 
