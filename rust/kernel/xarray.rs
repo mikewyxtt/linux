@@ -4,7 +4,7 @@
 //!
 //! C header: [`include/linux/xarray.h`](../../include/linux/xarray.h)
 
-use crate::{bindings, Error, Opaque, PointerWrapper, Result};
+use crate::{bindings, Error, Opaque, PointerWrapper, Result, ScopeGuard};
 use core::{marker::PhantomData, ops::Deref};
 
 /// Flags passed to `XArray::new` to configure the `XArray`.
@@ -138,6 +138,9 @@ impl<T: PointerWrapper> XArray<T> {
     /// Replaces an entry with a new value, returning the old value (if any).
     pub fn replace(&self, index: usize, value: T) -> Result<Option<T>> {
         let new = value.into_pointer();
+        let guard = ScopeGuard::new(|| unsafe {
+            T::from_pointer(new);
+        });
 
         let old = unsafe {
             bindings::xa_store(
@@ -150,12 +153,12 @@ impl<T: PointerWrapper> XArray<T> {
 
         let err = unsafe { bindings::xa_err(old) };
         if err != 0 {
-            // Make sure to drop the value we failed to store
-            unsafe { T::from_pointer(new) };
             Err(Error::from_kernel_errno(err))
         } else if old.is_null() {
+            guard.dismiss();
             Ok(None)
         } else {
+            guard.dismiss();
             Ok(Some(unsafe { T::from_pointer(old) }))
         }
     }
