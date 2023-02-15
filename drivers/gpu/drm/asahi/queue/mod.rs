@@ -27,6 +27,7 @@ use crate::util::*;
 use crate::{alloc, buffer, channel, event, file, fw, gem, gpu, microseq, mmu, object, workqueue};
 use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 
+use core::any::Any;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -157,6 +158,7 @@ impl dma_fence::FenceOps for JobFence::ver {
 pub(crate) struct QueueJob {
     dev: AsahiDevice,
     vm_bind: mmu::VmBind,
+    op_guard: Option<gpu::OpGuard>,
     sj_vtx: Option<SubQueueJob::ver>,
     sj_frag: Option<SubQueueJob::ver>,
     sj_comp: Option<SubQueueJob::ver>,
@@ -217,6 +219,21 @@ impl sched::JobImpl for QueueJob::ver {
     fn run(job: &mut sched::Job<Self>) -> Result<Option<dma_fence::Fence>> {
         mod_dev_dbg!(job.dev, "QueueJob: Running Job\n");
 
+        let dev = job.dev.data();
+        let gpu = match dev
+            .gpu
+            .clone()
+            .arc_as_any()
+            .downcast::<gpu::GpuManager::ver>()
+        {
+            Ok(gpu) => gpu,
+            Err(_) => panic!("GpuManager mismatched with JobImpl!"),
+        };
+
+        if job.op_guard.is_none() {
+            job.op_guard = Some(gpu.start_op()?);
+        }
+
         // First submit all the commands for each queue. This can fail.
 
         let mut frag_job = None;
@@ -248,12 +265,6 @@ impl sched::JobImpl for QueueJob::ver {
                 comp_sub = Some(wqjob.submit()?);
             }
         }
-
-        let dev = job.dev.data();
-        let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
-            Some(gpu) => gpu,
-            None => panic!("GpuManager mismatched with JobImpl!"),
-        };
 
         // Now we fully commit to running the job
         mod_dev_dbg!(job.dev, "QueueJob: Run fragment\n");
@@ -446,9 +457,14 @@ impl Queue for Queue::ver {
         commands: Vec<bindings::drm_asahi_command>,
     ) -> Result {
         let dev = self.dev.data();
-        let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
-            Some(gpu) => gpu,
-            None => panic!("GpuManager mismatched with Queue!"),
+        let gpu = match dev
+            .gpu
+            .clone()
+            .arc_as_any()
+            .downcast::<gpu::GpuManager::ver>()
+        {
+            Ok(gpu) => gpu,
+            Err(_) => panic!("GpuManager mismatched with JobImpl!"),
         };
 
         mod_dev_dbg!(self.dev, "Queue: Submit job\n");
@@ -457,6 +473,12 @@ impl Queue for Queue::ver {
             dev_err!(self.dev, "GPU is crashed, cannot submit\n");
             return Err(ENODEV);
         }
+
+        let op_guard = if !in_syncs.is_empty() {
+            Some(gpu.start_op()?)
+        } else {
+            None
+        };
 
         let mut events: [Vec<Option<workqueue::QueueEventInfo::ver>>; SQ_COUNT] =
             Default::default();
@@ -471,6 +493,7 @@ impl Queue for Queue::ver {
         let mut job = self.entity.new_job(QueueJob::ver {
             dev: self.dev.clone(),
             vm_bind,
+            op_guard,
             sj_vtx: self.q_vtx.as_mut().map(|a| a.new_job()),
             sj_frag: self.q_frag.as_mut().map(|a| a.new_job()),
             sj_comp: self.q_comp.as_mut().map(|a| a.new_job()),
