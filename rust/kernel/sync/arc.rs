@@ -22,6 +22,7 @@ use alloc::{
 };
 use core::{
     alloc::Layout,
+    any::Any,
     convert::{AsRef, TryFrom},
     fmt,
     marker::{PhantomData, Unsize},
@@ -200,6 +201,24 @@ impl<T: ?Sized> Arc<T> {
         // SAFETY: The constraint that lifetime of the shared reference must outlive that of
         // the returned `ArcBorrow` ensures that the object remains alive.
         unsafe { ArcBorrow::new(self.ptr) }
+    }
+}
+
+impl Arc<dyn Any + Send + Sync> {
+    /// Attempt to downcast the `Arc<dyn Any + Send + Sync>` to a concrete type.
+    pub fn downcast<T>(self) -> core::result::Result<Arc<T>, Self>
+    where
+        T: Any + Send + Sync,
+    {
+        if (*self).is::<T>() {
+            unsafe {
+                let ptr = self.ptr.cast::<ArcInner<T>>();
+                core::mem::forget(self);
+                Ok(Arc::from_inner(ptr))
+            }
+        } else {
+            Err(self)
+        }
     }
 }
 
