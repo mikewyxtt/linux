@@ -18,6 +18,8 @@ use kernel::{
 
 use kernel::drm::gem::BaseObject;
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::file::DrmFile;
@@ -34,6 +36,8 @@ pub(crate) struct DriverObject {
     vm_id: Option<u64>,
     /// Locked list of mapping tuples: (file_id, vm_id, mapping)
     mappings: Mutex<Vec<(u64, u64, crate::mmu::Mapping)>>,
+    /// ID for debug
+    id: u64,
 }
 
 /// Type alias for the shmem GEM object type for this driver.
@@ -49,6 +53,8 @@ pub(crate) struct ObjectRef {
     /// The kernel-side VMap of this object, if needed
     vmap: Option<shmem::VMap<DriverObject>>,
 }
+
+static GEM_ID: AtomicU64 = AtomicU64::new(0);
 
 impl DriverObject {
     /// Drop all object mappings for a given file ID.
@@ -221,6 +227,7 @@ pub(crate) fn new_kernel_object(dev: &AsahiDevice, size: usize) -> Result<Object
 
     gem.set_exportable(false);
 
+    mod_pr_debug!("DriverObject new kernel object id={}\n", gem.id);
     Ok(ObjectRef::new(gem.into_ref()))
 }
 
@@ -239,6 +246,11 @@ pub(crate) fn new_object(
     gem.set_exportable(vm_id.is_none());
     gem.set_wc(flags & bindings::ASAHI_GEM_WRITEBACK == 0);
 
+    mod_pr_debug!(
+        "DriverObject new user object: vm_id={:?} id={}\n",
+        vm_id,
+        gem.id
+    );
     Ok(ObjectRef::new(gem.into_ref()))
 }
 
@@ -250,19 +262,27 @@ pub(crate) fn lookup_handle(file: &DrmFile, handle: u32) -> Result<ObjectRef> {
 impl gem::BaseDriverObject<Object> for DriverObject {
     /// Callback to create the inner data of a GEM object
     fn new(_dev: &AsahiDevice, _size: usize) -> Result<DriverObject> {
-        mod_pr_debug!("DriverObject::new\n");
+        let id = GEM_ID.fetch_add(1, Ordering::Relaxed);
+        mod_pr_debug!("DriverObject::new id={}\n", id);
         Ok(DriverObject {
             kernel: false,
             flags: 0,
             vm_id: None,
             mappings: Mutex::new(Vec::new()),
+            id,
         })
     }
 
     /// Callback to drop all mappings for a GEM object owned by a given `File`
     fn close(obj: &Object, file: &DrmFile) {
-        mod_pr_debug!("DriverObject::close\n");
+        mod_pr_debug!("DriverObject::close vm_id={:?} id={}\n", obj.vm_id, obj.id);
         obj.drop_file_mappings(file.file_id());
+    }
+}
+
+impl Drop for DriverObject {
+    fn drop(&mut self) {
+        mod_pr_debug!("DriverObject::drop vm_id={:?} id={}\n", self.vm_id, self.id);
     }
 }
 
