@@ -141,9 +141,9 @@ impl Default for ID {
 
 /// A guard representing one active submission on the GPU. When dropped, decrements the active
 /// submission count.
-pub(crate) struct OpGuard<'a>(&'a dyn GpuManagerPriv);
+pub(crate) struct OpGuard(Arc<dyn GpuManagerPriv>);
 
-impl<'a> Drop for OpGuard<'a> {
+impl Drop for OpGuard {
     fn drop(&mut self) {
         self.0.end_op();
     }
@@ -187,6 +187,8 @@ pub(crate) struct GpuManager {
 pub(crate) trait GpuManager: Send + Sync {
     /// Cast as an Any type.
     fn as_any(&self) -> &dyn Any;
+    /// Cast Arc<Self> as an Any type.
+    fn arc_as_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;
     /// Initialize the GPU.
     fn init(&self) -> Result;
     /// Update the GPU globals from global info
@@ -236,9 +238,6 @@ pub(crate) trait GpuManager: Send + Sync {
     fn get_cfg(&self) -> &'static hw::HwConfig;
     /// Get the dynamic GPU configuration for this SoC.
     fn get_dyncfg(&self) -> &hw::DynConfig;
-    /// Increment the pending submission counter and notify the GPU firmware, returning a guard to
-    /// decrement the counter when dropped.
-    fn start_op(&self) -> Result<OpGuard<'_>>;
 }
 
 /// Private generic trait for functions that don't need to escape this module.
@@ -774,12 +773,31 @@ impl GpuManager::ver {
     pub(crate) fn is_crashed(&self) -> bool {
         self.crashed.load(Ordering::Relaxed)
     }
+
+    pub(crate) fn start_op(self: &Arc<GpuManager::ver>) -> Result<OpGuard> {
+        if self.is_crashed() {
+            return Err(ENODEV);
+        }
+
+        let val = self
+            .initdata
+            .globals
+            .with(|raw, _inner| raw.pending_submissions.fetch_add(1, Ordering::Acquire));
+
+        mod_dev_dbg!(self.dev, "OP start (pending: {})\n", val + 1);
+        self.kick_firmware()?;
+        Ok(OpGuard(self.clone()))
+    }
 }
 
 #[versions(AGX)]
 impl GpuManager for GpuManager::ver {
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn arc_as_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send> {
+        self as Arc<dyn Any + Sync + Send>
     }
 
     fn init(&self) -> Result {
@@ -1047,21 +1065,6 @@ impl GpuManager for GpuManager::ver {
 
     fn get_dyncfg(&self) -> &hw::DynConfig {
         &self.dyncfg
-    }
-
-    fn start_op(&self) -> Result<OpGuard<'_>> {
-        if self.is_crashed() {
-            return Err(ENODEV);
-        }
-
-        let val = self
-            .initdata
-            .globals
-            .with(|raw, _inner| raw.pending_submissions.fetch_add(1, Ordering::Acquire));
-
-        mod_dev_dbg!(self.dev, "OP start (pending: {})\n", val + 1);
-        self.kick_firmware()?;
-        Ok(OpGuard(self))
     }
 }
 
