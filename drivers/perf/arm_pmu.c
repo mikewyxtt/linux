@@ -556,7 +556,7 @@ static bool armpmu_filter(struct pmu *pmu, int cpu)
 	if (ret && armpmu->filter)
 		return armpmu->filter(pmu, cpu);
 
-	return ret;
+	return !ret;
 }
 
 static ssize_t cpus_show(struct device *dev,
