@@ -193,7 +193,7 @@ impl EventManager {
                 owner.signal();
             }
             None => {
-                pr_err!("Received event for empty slot {}", slot);
+                mod_pr_debug!("EventManager: Received event for empty slot {}", slot);
             }
         }
     }
