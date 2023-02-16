@@ -23,6 +23,7 @@
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
+#include <linux/errname.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
@@ -72,6 +73,12 @@ long rust_helper_PTR_ERR(__force const void *ptr)
 	return PTR_ERR(ptr);
 }
 EXPORT_SYMBOL_GPL(rust_helper_PTR_ERR);
+
+const char *rust_helper_errname(int err)
+{
+	return errname(err);
+}
+EXPORT_SYMBOL_GPL(rust_helper_errname);
 
 void rust_helper_xa_init_flags(struct xarray *xa, gfp_t flags)
 {
