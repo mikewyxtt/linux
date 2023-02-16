@@ -18,6 +18,7 @@
 #include "lockdep.c"
 #include "mutex.c"
 #include "page.c"
+#include "platform_device.c"
 #include "refcount.c"
 #include "signal.c"
 #include "siphash.c"
