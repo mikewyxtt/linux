@@ -440,7 +440,7 @@ static int tb_drom_parse_entries(struct tb_switch *sw, size_t header_size)
  */
 static int tb_drom_copy_property(struct tb_switch *sw, const char *name, u16 *size)
 {
-	struct device *dev = &sw->tb->nhi->pdev->dev;
+	struct device *dev = sw->tb->nhi->dev;
 	int len, res;
 
 	len = device_property_count_u8(dev, name);
