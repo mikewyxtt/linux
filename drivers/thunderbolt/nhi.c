@@ -575,16 +575,18 @@ static struct tb_ring *tb_ring_alloc(struct tb_nhi *nhi, u32 hop, int size,
 	if (!ring->descriptors)
 		goto err_free_ring;
 
-	if (ring_request_msix(ring, flags & RING_FLAG_NO_SUSPEND))
+	if (nhi->ops && nhi->ops->ring_request_irq &&
+	    nhi->ops->ring_request_irq(ring, flags & RING_FLAG_NO_SUSPEND))
 		goto err_free_descs;
 
 	if (nhi_alloc_hop(nhi, ring))
-		goto err_release_msix;
+		goto err_release_irq;
 
 	return ring;
 
-err_release_msix:
-	ring_release_msix(ring);
+err_release_irq:
+	if (nhi->ops && nhi->ops->ring_release_irq)
+		nhi->ops->ring_release_irq(ring);
 err_free_descs:
 	dma_free_coherent(ring->nhi->dev,
 			  ring->size * sizeof(*ring->descriptors),
@@ -786,7 +788,8 @@ void tb_ring_free(struct tb_ring *ring)
 	}
 	spin_unlock_irq(&ring->nhi->lock);
 
-	ring_release_msix(ring);
+	if (ring->nhi->ops && ring->nhi->ops->ring_release_irq)
+		ring->nhi->ops->ring_release_irq(ring);
 
 	dma_free_coherent(ring->nhi->dev,
 			  ring->size * sizeof(*ring->descriptors),
@@ -1260,6 +1263,8 @@ static struct tb *nhi_select_cm(struct tb_nhi *nhi)
 	return tb;
 }
 
+static const struct tb_nhi_ops pci_nhi_ops;
+
 static int nhi_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct device *dev = &pdev->dev;
@@ -1284,6 +1289,8 @@ static int nhi_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	nhi->dev = dev;
 	nhi->ops = (const struct tb_nhi_ops *)id->driver_data;
+	if (!nhi->ops)
+		nhi->ops = &pci_nhi_ops;
 	/* cannot fail - table is allocated in pcim_iomap_regions */
 	nhi->iobase = pcim_iomap_table(pdev)[0];
 	nhi->hop_count = ioread32(nhi->iobase + REG_HOP_COUNT) & 0x3ff;
@@ -1389,6 +1396,13 @@ const struct tb_nhi_ops icl_nhi_ops = {
 	.runtime_suspend = icl_nhi_suspend,
 	.runtime_resume = icl_nhi_resume,
 	.shutdown = icl_nhi_shutdown,
+	.ring_request_irq = ring_request_msix,
+	.ring_release_irq = ring_release_msix,
+};
+
+static const struct tb_nhi_ops pci_nhi_ops = {
+	.ring_request_irq = ring_request_msix,
+	.ring_release_irq = ring_release_msix,
 };
 
 static struct pci_device_id nhi_ids[] = {
