@@ -9,3 +9,15 @@ config PHY_APPLE_ATC
 	  Enable this to add support for the Apple Type-C PHY, switch
 	  and mux found in Apple SoCs such as the M1.
 	  This driver currently provides support for USB2 and USB3.
+
+config PHY_APPLE_ATC_CROSSBAR
+	tristate "Apple Type-C PHY Display crossbar
+	depends on ARCH_APPLE || COMPILE_TEST
+	default ARCH_APPLE
+	select MULTIPLEXER
+	help
+	  Enable this to add support the Type-C PHY's display crossbar used to
+	  route dispaly controller streams to the Type-C ports.
+
+	  To compile this driver as a module, chose M here: the module will be
+	  called phy-apple-atc-display-crossbar.
