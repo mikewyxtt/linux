@@ -1627,6 +1627,11 @@ int tb_tunnel_restart(struct tb_tunnel *tunnel)
 			goto err;
 	}
 
+	/* Notify NHI if this tunnel starts at the root switch */
+	if(tb_route(tunnel->src_port->sw) == 0 &&
+	   tunnel->tb->nhi->ops->oob_notify_tunnel_state)
+		tunnel->tb->nhi->ops->oob_notify_tunnel_state(tunnel, true);
+
 	return 0;
 
 err:
@@ -1673,6 +1678,12 @@ void tb_tunnel_deactivate(struct tb_tunnel *tunnel)
 		if (tunnel->paths[i] && tunnel->paths[i]->activated)
 			tb_path_deactivate(tunnel->paths[i]);
 	}
+
+	/* Notify NHI if this tunnel starts at the root switch */
+	if(tb_route(tunnel->src_port->sw) == 0 &&
+	   tunnel->tb->nhi->ops->oob_notify_tunnel_state)
+		tunnel->tb->nhi->ops->oob_notify_tunnel_state(tunnel, false);
+
 }
 
 /**

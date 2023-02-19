@@ -27,6 +27,8 @@ enum nhi_mailbox_cmd {
 	NHI_MAILBOX_ALLOW_ALL_DEVS = 0x23,
 };
 
+struct tb_tunnel;
+
 /* Host interface quirks */
 #define QUIRK_AUTO_CLEAR_INT	BIT(0)
 #define QUIRK_E2E		BIT(1)
@@ -52,6 +54,7 @@ struct tb_nhi_ops {
 	int (*runtime_suspend)(struct tb_nhi *nhi);
 	int (*runtime_resume)(struct tb_nhi *nhi);
 	void (*shutdown)(struct tb_nhi *nhi);
+	void (*oob_notify_tunnel_state)(struct tb_tunnel *tunnel, bool active);
 	int (*ring_request_irq)(struct tb_ring *ring, bool no_suspend);
 	void (*ring_release_irq)(struct tb_ring *ring);
 	void (*ring_interrupt_active)(struct tb_ring *ring, bool active);
