@@ -647,6 +647,7 @@ static int apple_pcie_start_tunnel(struct tb_protocol_adapter *adapter)
 		if (ret < 0) {
 			dev_warn(port->pcie->dev,
 				"%pOF: tunnel PERST clear timeout\n", port->np);
+			apple_pcie_reset_tunnel(port);
 			continue;
 		}
 
@@ -1244,7 +1245,7 @@ static const struct pci_ecam_ops apple_pcie_usb4_cfg_ecam_ops = {
 
 static const struct of_device_id apple_pcie_of_match[] = {
 	{ .compatible = "apple,pcie", .data = &apple_pcie_cfg_ecam_ops },
-	{ .compatible = "apple,pcie-usb4", .data = &apple_pcie_usb4_cfg_ecam_ops },
+	{ .compatible = "apple,usb4-pcie", .data = &apple_pcie_usb4_cfg_ecam_ops },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, apple_pcie_of_match);
