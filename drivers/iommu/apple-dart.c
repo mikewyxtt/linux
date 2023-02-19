@@ -182,6 +182,8 @@ struct apple_dart_hw {
 	u64 ttbr_addr_field_shift;
 	u64 ttbr_shift;
 	int ttbr_count;
+
+	bool disable_bypass;
 };
 
 /*
@@ -1074,6 +1076,9 @@ static int apple_dart_probe(struct platform_device *pdev)
 	dart_params[1] = readl(dart->regs + DART_PARAMS2);
 	dart->pgsize = 1 << FIELD_GET(DART_PARAMS1_PAGE_SHIFT, dart_params[0]);
 	dart->supports_bypass = dart_params[1] & DART_PARAMS2_BYPASS_SUPPORT;
+
+	if (dart->hw->disable_bypass)
+		dart->supports_bypass = 0;
 
 	switch (dart->hw->type) {
 	case DART_T8020:
