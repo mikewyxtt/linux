@@ -29,6 +29,7 @@
 #include <linux/notifier.h>
 #include <linux/of_irq.h>
 #include <linux/pci-ecam.h>
+#include <linux/pm_domain.h>
 
 #define CORE_RC_PHYIF_CTL		0x00024
 #define   CORE_RC_PHYIF_CTL_RUN		BIT(0)
@@ -140,6 +141,9 @@ struct apple_pcie {
 	struct completion	event;
 	struct irq_fwspec	fwspec;
 	u32			nvecs;
+	struct device		**pd_dev;
+	struct device_link	**pd_link;
+	int			pd_count;
 };
 
 struct apple_pcie_port {
@@ -786,6 +790,62 @@ static void apple_pcie_unregister_bus_notifier(void)
 	mutex_unlock(&apple_pcie_bus_notifier_lock);
 }
 
+static void apple_pcie_detach_genpd(void *data)
+{
+	struct apple_pcie *pcie = data;
+	int i;
+
+	if (pcie->pd_count <= 1)
+		return;
+
+	for (i = pcie->pd_count - 1; i >= 0; i--) {
+		if (pcie->pd_link[i])
+			device_link_del(pcie->pd_link[i]);
+		if (!IS_ERR_OR_NULL(pcie->pd_dev[i]))
+			dev_pm_domain_detach(pcie->pd_dev[i], true);
+	}
+}
+
+static int apple_pcie_attach_genpd(struct apple_pcie *pcie)
+{
+	struct device *dev = pcie->dev;
+	int i;
+
+	pcie->pd_count = of_count_phandle_with_args(
+		dev->of_node, "power-domains", "#power-domain-cells");
+	if (pcie->pd_count <= 1)
+		return 0;
+
+	pcie->pd_dev = devm_kcalloc(dev, pcie->pd_count, sizeof(*pcie->pd_dev),
+				   GFP_KERNEL);
+	if (!pcie->pd_dev)
+		return -ENOMEM;
+
+	pcie->pd_link = devm_kcalloc(dev, pcie->pd_count, sizeof(*pcie->pd_link),
+				    GFP_KERNEL);
+	if (!pcie->pd_link)
+		return -ENOMEM;
+
+	for (i = 0; i < pcie->pd_count; i++) {
+		pcie->pd_dev[i] = dev_pm_domain_attach_by_id(dev, i);
+		if (IS_ERR(pcie->pd_dev[i])) {
+			apple_pcie_detach_genpd(pcie);
+			return PTR_ERR(pcie->pd_dev[i]);
+		}
+
+		pcie->pd_link[i] = device_link_add(dev, pcie->pd_dev[i],
+						  DL_FLAG_STATELESS |
+						  DL_FLAG_PM_RUNTIME |
+						  DL_FLAG_RPM_ACTIVE);
+		if (!pcie->pd_link[i]) {
+			apple_pcie_detach_genpd(pcie);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
 static int apple_pcie_init(struct pci_config_window *cfg)
 {
 	struct device *dev = cfg->parent;
@@ -801,6 +861,13 @@ static int apple_pcie_init(struct pci_config_window *cfg)
 	pcie->dev = dev;
 
 	mutex_init(&pcie->lock);
+
+	ret = apple_pcie_attach_genpd(pcie);
+	if (ret)
+		return ret;
+	ret = devm_add_action_or_reset(dev, apple_pcie_detach_genpd, pcie);
+	if (ret)
+		return ret;
 
 	pcie->base = devm_platform_ioremap_resource(platform, 1);
 	if (IS_ERR(pcie->base))
