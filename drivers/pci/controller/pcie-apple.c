@@ -132,6 +132,11 @@
  */
 #define DOORBELL_ADDR		CONFIG_PCIE_APPLE_MSI_DOORBELL_ADDR
 
+enum apple_pcie_type {
+	APPLE_PCIE,
+	APPLE_PCIE_USB4,
+};
+
 struct apple_pcie {
 	struct mutex		lock;
 	struct device		*dev;
@@ -144,6 +149,7 @@ struct apple_pcie {
 	struct device		**pd_dev;
 	struct device_link	**pd_link;
 	int			pd_count;
+	enum apple_pcie_type	type;
 };
 
 struct apple_pcie_port {
@@ -563,10 +569,12 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 		.num_parents = 0,
 	};
 
-	reset = devm_fwnode_gpiod_get(pcie->dev, of_fwnode_handle(np), "reset",
-				      GPIOD_OUT_LOW, "PERST#");
-	if (IS_ERR(reset))
-		return PTR_ERR(reset);
+	if (pcie->type == APPLE_PCIE) {
+		reset = devm_fwnode_gpiod_get(pcie->dev, of_fwnode_handle(np),
+					"reset", GPIOD_OUT_LOW, "PERST#");
+		if (IS_ERR(reset))
+			return PTR_ERR(reset);
+	}
 
 	port = devm_kzalloc(pcie->dev, sizeof(*port), GFP_KERNEL);
 	if (!port)
@@ -601,19 +609,22 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 	if (ret)
 		return ret;
 
-	/* Assert PERST# before setting up the clock */
-	gpiod_set_value(reset, 1);
+	if (pcie->type == APPLE_PCIE) {
+		/* Assert PERST# before setting up the clock */
+		gpiod_set_value(reset, 1);
 
-	ret = apple_pcie_setup_refclk(pcie, port);
-	if (ret < 0)
-		return ret;
+		ret = apple_pcie_setup_refclk(pcie, port);
+		if (ret < 0)
+			return ret;
+	}
 
 	/* The minimal Tperst-clk value is 100us (PCIe CEM r5.0, 2.9.2) */
 	usleep_range(100, 200);
 
 	/* Deassert PERST# */
 	rmw_set(PORT_PERST_OFF, port->base + PORT_PERST);
-	gpiod_set_value(reset, 0);
+	if (pcie->type == APPLE_PCIE)
+		gpiod_set_value(reset, 0);
 
 	/* Wait for 100ms after PERST# deassertion (PCIe r5.0, 6.6.1) */
 	msleep(100);
@@ -648,10 +659,18 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 	ret = apple_pcie_port_register_irqs(port);
 	WARN_ON(ret);
 
-	writel_relaxed(PORT_LTSSMCTL_START, port->base + PORT_LTSSMCTL);
-	wait_for_completion_timeout(&port->event, HZ / 10);
-	if (!port->link_up)
-		dev_warn(pcie->dev, "%pOF link didn't come up\n", np);
+	switch (pcie->type) {
+	case APPLE_PCIE:
+		/* Start link training directly for internal PCIe */
+		writel_relaxed(PORT_LTSSMCTL_START, port->base + PORT_LTSSMCTL);
+		wait_for_completion_timeout(&port->event, HZ / 10);
+		if (!port->link_up)
+			dev_warn(pcie->dev, "%pOF link didn't come up\n", np);
+		break;
+	case APPLE_PCIE_USB4:
+		/* Link training will be started once a tunnel is established */
+		break;
+	}
 
 	return 0;
 }
@@ -902,7 +921,8 @@ static int apple_pcie_attach_genpd(struct apple_pcie *pcie)
 	return 0;
 }
 
-static int apple_pcie_init(struct pci_config_window *cfg)
+static int apple_pcie_init_common(struct pci_config_window *cfg,
+				  enum apple_pcie_type type)
 {
 	struct device *dev = cfg->parent;
 	struct platform_device *platform = to_platform_device(dev);
@@ -915,6 +935,7 @@ static int apple_pcie_init(struct pci_config_window *cfg)
 		return -ENOMEM;
 
 	pcie->dev = dev;
+	pcie->type = type;
 
 	mutex_init(&pcie->lock);
 
@@ -944,6 +965,16 @@ static int apple_pcie_init(struct pci_config_window *cfg)
 	return apple_msi_init(pcie);
 }
 
+static int apple_pcie_init(struct pci_config_window *cfg)
+{
+	return apple_pcie_init_common(cfg, APPLE_PCIE);
+}
+
+static int apple_pcie_init_usb4(struct pci_config_window *cfg)
+{
+	return apple_pcie_init_common(cfg, APPLE_PCIE_USB4);
+}
+
 static int apple_pcie_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -968,8 +999,18 @@ static const struct pci_ecam_ops apple_pcie_cfg_ecam_ops = {
 	}
 };
 
+static const struct pci_ecam_ops apple_pcie_usb4_cfg_ecam_ops = {
+	.init		= apple_pcie_init_usb4,
+	.pci_ops	= {
+		.map_bus	= pci_ecam_map_bus,
+		.read		= pci_generic_config_read,
+		.write		= pci_generic_config_write,
+	}
+};
+
 static const struct of_device_id apple_pcie_of_match[] = {
 	{ .compatible = "apple,pcie", .data = &apple_pcie_cfg_ecam_ops },
+	{ .compatible = "apple,pcie-usb4", .data = &apple_pcie_usb4_cfg_ecam_ops },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, apple_pcie_of_match);
