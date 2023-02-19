@@ -31,6 +31,10 @@
 #include <linux/of_irq.h>
 #include <linux/pci-ecam.h>
 #include <linux/pm_domain.h>
+#include <linux/thunderbolt.h>
+
+/* for pci_dev_set_disconnected */
+#include "../pci.h"
 
 #define CORE_RC_PHYIF_CTL		0x00024
 #define   CORE_RC_PHYIF_CTL_RUN		BIT(0)
@@ -122,6 +126,8 @@
 #define PORT_PREFMEM_ENABLE		0x00994
 
 #define MAX_RID2SID			64
+
+#define USB4_TUNNEL_RETRIES		5
 
 /*
  * The doorbell address is set to 0xfffff000, which by convention
@@ -530,6 +536,215 @@ static u32 apple_pcie_rid2sid_write(struct apple_pcie_port *port,
 	return readl_relaxed(port->base + PORT_RID2SID(idx));
 }
 
+static void apple_pcie_stop_ltssm(struct apple_pcie_port *port)
+{
+	static struct {
+		unsigned int	offset;
+		unsigned int	mask;
+		const char	*name;
+	} fifo_levels[] = {
+		{ PORT_OUTS_NPREQS,	PORT_OUTS_NPREQS_REQ,		"OUTS_NPREQS_REQ" },
+		{ PORT_OUTS_NPREQS,	PORT_OUTS_NPREQS_CPL,		"OUTS_NPREQS_CPL" },
+		{ PORT_OUTS_PREQS_HDR,	PORT_OUTS_PREQS_HDR_MASK,	"OUTS_PREQS_HDR"  },
+		{ PORT_OUTS_PREQS_DATA,	PORT_OUTS_PREQS_DATA_MASK,	"OUTS_PREQS_DATA" },
+		{ PORT_RXWR_FIFO,	PORT_RXWR_FIFO_DATA,		"RXWR_FIFO_DATA"  },
+		{ PORT_RXWR_FIFO,	PORT_RXWR_FIFO_HDR,		"RXWR_FIFO_HDR"   },
+		{ PORT_RXRD_FIFO,	PORT_RXRD_FIFO_REQ,		"RXRD_FIFO_REQ"   },
+		{ PORT_OUTS_CPLS,	PORT_OUTS_CPLS_SHRD,		"OUTS_CPLS_SHRD"  },
+	};
+	u32 val;
+	int ret;
+
+	writel_relaxed(0, port->base + PORT_LTSSMCTL);
+
+	for (int i = 0; i < ARRAY_SIZE(fifo_levels); i++) {
+		ret = readl_relaxed_poll_timeout(port->base + fifo_levels[i].offset,
+						val,
+						!(val & fifo_levels[i].mask),
+						100, USEC_PER_SEC / 100);
+		if (ret)
+			dev_warn(port->pcie->dev,
+				"port %pOF waiting for %s to empty timed out\n",
+				port->np,
+				fifo_levels[i].name);
+	}
+}
+
+static void apple_pcie_reset_tunnel(struct apple_pcie_port *port)
+{
+	struct apple_pcie *pcie = port->pcie;
+	int ret;
+	u32 stat;
+
+	rmw_set(PORT_TUNCTRL_PERST_ON, port->base + PORT_TUNCTRL);
+	ret = readl_relaxed_poll_timeout(port->base + PORT_TUNSTAT,
+					stat,
+					(stat & PORT_TUNSTAT_PERST_ON),
+					100, USEC_PER_SEC / 100);
+	if (ret < 0)
+		dev_warn(pcie->dev,
+			"port %pOF tunnel PERST set timeout\n", port->np);
+
+	rmw_set(PORT_TUNCTRL_PERST_ACK_REQ, port->base + PORT_TUNCTRL);
+	ret = readl_relaxed_poll_timeout(port->base + PORT_TUNSTAT,
+					stat,
+					!(stat & PORT_TUNSTAT_PERST_ACK_PEND),
+					100, USEC_PER_SEC / 100);
+	if (ret < 0)
+		dev_warn(pcie->dev,
+			"port %pOF tunnel PERST REQ ack clear timeout\n", port->np);
+
+	rmw_clear(PORT_TUNCTRL_PERST_ACK_REQ, port->base + PORT_TUNCTRL);
+}
+
+static int apple_pcie_start_tunnel(struct tb_protocol_adapter *adapter)
+{
+	struct apple_pcie_port *port = tb_protocol_adapter_get_drvdata(adapter);
+	struct apple_pcie *pcie = port->pcie;
+	struct pci_host_bridge *bridge =
+		platform_get_drvdata(to_platform_device(pcie->dev));
+	struct pci_dev *dev;
+	struct pci_bus *bus;
+	int ret;
+	u32 stat;
+
+	/*
+	 * Make sure nothing else tries to rescan the bus while we're bringing
+	 * the tunnel up.
+	 */
+	pci_lock_rescan_remove();
+
+	/*
+	 * The root port device might alread exist here with an empty
+	 * subordinate bus. Remove it first such that we don't leave the
+	 * dangling bus behind when calling pci_hp_add_bridge.
+	 */
+	dev = pci_get_slot(bridge->bus, PCI_DEVFN(port->idx, 0));
+	if (dev) {
+		pci_stop_and_remove_bus_device(dev);
+		pci_dev_put(dev);
+	}
+
+	port->link_up = false;
+	ret = readl_relaxed_poll_timeout(port->base + PORT_STATUS, stat,
+					 stat & PORT_STATUS_READY, 100, 250000);
+	if (ret < 0) {
+		dev_err(pcie->dev, "%pOF: ready wait timeout\n", port->np);
+		ret = -ETIMEDOUT;
+		goto out;
+	}
+
+	for (int attempt = 0; attempt < USB4_TUNNEL_RETRIES; ++attempt) {
+		dev_dbg(pcie->dev, "%pOF: starting tunnel attempt %d\n",
+			port->np, attempt);
+
+		/* Deassert tunnel reset and wait until the tunnel is ready */
+		rmw_clear(PORT_TUNCTRL_PERST_ON, port->base + PORT_TUNCTRL);
+		ret = readl_relaxed_poll_timeout(port->base + PORT_TUNSTAT,
+						stat,
+						!(stat & PORT_TUNSTAT_PERST_ON),
+						100, USEC_PER_SEC / 100);
+		if (ret < 0) {
+			dev_warn(port->pcie->dev,
+				"%pOF: tunnel PERST clear timeout\n", port->np);
+			continue;
+		}
+
+		/* Start link training and wait for the next interrupt */
+		reinit_completion(&port->event);
+		writel_relaxed(PORT_LTSSMCTL_START, port->base + PORT_LTSSMCTL);
+		wait_for_completion_timeout(&port->event, HZ / 10);
+		if (port->link_up)
+			break;
+
+		/* On tunnel error/link down reset the tunnel and try again */
+		dev_warn(pcie->dev, "%pOF: link didn't come up\n", port->np);
+		apple_pcie_stop_ltssm(port);
+		apple_pcie_reset_tunnel(port);
+	}
+
+	if (!port->link_up) {
+		dev_warn(pcie->dev,
+			"%pOF: tunnel didn't come up after %d attempts; giving up.\n",
+			port->np, USB4_TUNNEL_RETRIES);
+		ret = -ETIMEDOUT;
+		goto out;
+	}
+
+	/* Recreate the root port device */
+	pci_scan_slot(bridge->bus, PCI_DEVFN(port->idx, 0));
+	dev = pci_get_slot(bridge->bus, PCI_DEVFN(port->idx, 0));
+	if (!dev) {
+		dev_err(pcie->dev, "%pOF: root port device not found after rescan.\n", port->np);
+		ret = -ENODEV;
+		goto out;
+	}
+
+	/*
+	 * Add the root port as a hot plug bridge to create its bus and assign
+	 * the required resources.
+	 */
+	pci_hp_add_bridge(dev);
+	pci_assign_unassigned_root_bus_resources(bridge->bus);
+	list_for_each_entry(bus, &bridge->bus->children, node) {
+		if (bus->self == dev) {
+			pcie_bus_configure_settings(bus);
+			break;
+		}
+	}
+	pci_dev_put(dev);
+
+	/*
+	 * Re-enable prefetchable memory which was automatically disabled by
+	 * the hardware when the resources were reconfigured.
+	 */
+	writel_relaxed(1, port->base + PORT_PREFMEM_ENABLE);
+
+	/* And finally scan the new bus for devices */
+	pci_bus_add_devices(bridge->bus);
+
+out:
+	pci_unlock_rescan_remove();
+	return ret;
+}
+
+static void apple_pcie_stop_tunnel(struct tb_protocol_adapter *adapter)
+{
+	struct apple_pcie_port *port = tb_protocol_adapter_get_drvdata(adapter);
+	struct apple_pcie *pcie = port->pcie;
+	struct pci_host_bridge *bridge =
+		platform_get_drvdata(to_platform_device(port->pcie->dev));
+	struct pci_dev *dev;
+
+	dev_dbg(pcie->dev, "%pOF: stopping tunnel\n", port->np);
+	pci_lock_rescan_remove();
+
+	dev = pci_get_slot(bridge->bus, PCI_DEVFN(port->idx, 0));
+	if (dev) {
+		/* The tunnel is already gone, mark all devices as dead */
+		if (dev->subordinate)
+			pci_walk_bus(dev->subordinate, pci_dev_set_disconnected, NULL);
+
+		/* Remove the root port device and the corresponding bus */
+		pci_stop_and_remove_bus_device(dev);
+		pci_dev_put(dev);
+	}
+
+	/* Disable link training and assert tunnel reset */
+	apple_pcie_stop_ltssm(port);
+	apple_pcie_reset_tunnel(port);
+
+	/*
+	 * Rescan the root port device since it still exists. This technically
+	 * isn't required but the port initially comes up with no subordinate
+	 * devices after probing and would also show up again when a manual
+	 * rescan is triggered. Just already restore it here for consistency.
+	 */
+	pci_scan_slot(bridge->bus, PCI_DEVFN(port->idx, 0));
+
+	pci_unlock_rescan_remove();
+}
+
 #define clkhw_to_port(_hw) container_of(_hw, struct apple_pcie_port, clk)
 
 static int apple_pcie_appclk_enable(struct clk_hw *hw)
@@ -569,11 +784,16 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 	struct platform_device *platform = to_platform_device(pcie->dev);
 	struct apple_pcie_port *port;
 	struct gpio_desc *reset;
+	struct tb_protocol_adapter *adapter;
 	u32 stat, idx;
 	int ret, i;
 	struct clk_init_data clk_init = {
 		.ops = &apple_pcie_appclk_ops,
 		.num_parents = 0,
+	};
+	struct tb_protocol_adapter_desc adapter_desc = {
+		.activate = apple_pcie_start_tunnel,
+		.deactivate = apple_pcie_stop_tunnel,
 	};
 
 	if (pcie->type == APPLE_PCIE) {
@@ -676,6 +896,13 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 		break;
 	case APPLE_PCIE_USB4:
 		/* Link training will be started once a tunnel is established */
+		adapter_desc.driver_data = port;
+		adapter_desc.fwnode = of_fwnode_handle(np);
+		adapter = tb_protocol_adapter_register(pcie->dev, &adapter_desc);
+		if (IS_ERR(adapter))
+			return dev_err_probe(pcie->dev, PTR_ERR(adapter),
+				"%pOF: could not register USB4 protocol adapter.\n",
+				np);
 		break;
 	}
 
