@@ -673,6 +673,10 @@
 				     <AIC_IRQ 272 IRQ_TYPE_LEVEL_HIGH>,
 				     <AIC_IRQ 273 IRQ_TYPE_LEVEL_HIGH>,
 				     <AIC_IRQ 274 IRQ_TYPE_LEVEL_HIGH>;
+
+			acio1_pins: acio1-pins {
+				pinmux = <APPLE_PINMUX(41, 1)>;
+			};
 		};
 
 		ans_mbox: mbox@277408000 {
@@ -920,9 +924,10 @@
 				<0x5 0x03050000 0x0 0x8000>,
 				<0x5 0x0 0x0 0x4000>,
 				<0x5 0x02a90000 0x0 0x4000>,
-				<0x5 0x02a84000 0x0 0x4000>;
+				<0x5 0x02a84000 0x0 0x4000>,
+				<0x2 0x3b788000 0x0 0x4000>;
 			reg-names = "core", "lpdptx", "axi2af", "usb2phy",
-				"pipehandler";
+				"pipehandler", "usb4pmgr";
 
 			nvmem-cells = <&atcphy1_aus_cmn_shm_vreg_trim>,
 				<&atcphy1_auspll_rodco_encap>,
@@ -947,11 +952,253 @@
 
 			#phy-cells = <1>;
 			#reset-cells = <0>;
+			#clock-cells = <0>;
 
 			orientation-switch;
 			mode-switch;
 			svid = <0xff01>, <0x8087>;
-			power-domains = <&ps_atc1_usb>;
+			power-domains = <&ps_atc1_usb_aon>, <&ps_atc1_common>;
+		};
+
+		acio1_mbox: mailbox@501100000 {
+			compatible = "apple,t8103-m3-mailbox-v2",
+				"apple,m3-mailbox-v2";
+			reg = <0x5 0x01100000 0x0 0x4000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 892 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 893 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 894 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 895 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "send-empty", "send-not-empty",
+				"recv-empty", "recv-not-empty";
+			#mbox-cells = <0>;
+		};
+
+		atc1_dpin0: phy@501e50000 {
+			reg = <0x5 0x01e50000 0x0 0x4000>;
+			compatible = "apple,t8103-atcphy-dpin", "apple,atcphy-dpin";
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 887 IRQ_TYPE_LEVEL_HIGH>;
+			#phy-cells = <0>;
+		};
+
+		atc1_dpin1: phy@501e58000 {
+			reg = <0x5 0x01e58000 0x0 0x4000>;
+			compatible = "apple,t8103-atcphy-dpin", "apple,atcphy-dpin";
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 888 IRQ_TYPE_LEVEL_HIGH>;
+			#phy-cells = <0>;
+		};
+
+		acio1: nhi@501f00000 {
+			compatible = "apple,t8103-usb4-nhi", "apple,usb4-nhi";
+			reg = <0x5 0x01f00000 0x0 0x100000>,
+				<0x5 0x01ac0000 0x0 0xc000>,
+				<0x5 0x01e44000 0x0 0x4000>,
+				<0x5 0x01080000 0x0 0x20000>;
+			reg-names = "nhi", "m3", "pcie-adapter", "sram";
+
+			mboxes = <&acio1_mbox>;
+
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 863 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 864 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 865 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 866 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 867 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 868 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 869 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 870 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 871 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 872 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 873 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 874 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 875 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 876 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 877 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 878 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 879 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 880 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 881 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 882 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 883 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 884 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 885 IRQ_TYPE_LEVEL_HIGH>,
+				<AIC_IRQ 886 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names =
+				"txring0", "txring1", "txring2",
+				"txring3", "txring4", "txring5",
+				"txring6", "txring7", "txring8",
+				"txring9", "txring10", "txring11",
+				"rxring0", "rxring1", "rxring2",
+				"rxring3", "rxring4", "rxring5",
+				"rxring6", "rxring7", "rxring8",
+				"rxring9", "rxring10", "rxring11";
+
+			power-domains = <&ps_atc1_cio>,
+					<&ps_atc1_cio_pcie>,
+					<&ps_atc1_cio_usb>;
+
+			phys = <&atcphy1 PHY_TYPE_USB4>;
+			phy-names = "usb4-phy";
+
+			orientation-switch;
+			mode-switch;
+			svid = <0x8087>;
+
+			pinctrl-0 = <&acio1_pins>;
+			pinctrl-names = "default";
+
+			apple,sram-dva-base = <0x0 0x10000000>;
+
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+			nonposted-mmio;
+
+			acio1_dart: iommu@501a80000 {
+				compatible = "apple,t8103-dart";
+				reg = <0x5 0x01a80000 0x0 0x4000>;
+				interrupt-parent = <&aic>;
+				interrupts = <AIC_IRQ 890 IRQ_TYPE_LEVEL_HIGH>;
+				#iommu-cells = <1>;
+			};
+
+			nhi {
+				iommus = <&acio1_dart 1>;
+			};
+
+			dummy {
+				iommus = <&acio1_dart 15>;
+			};			
+		};
+
+		pcie1_dart_0: iommu@521008000 {
+			compatible = "apple,t8103-usb4-dart";
+			reg = <0x5 0x21008000 0x0 0x4000>;
+			#iommu-cells = <1>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 851 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&ps_apcie_gp>;
+			clocks = <&port10>;
+		};
+
+		pciec1: pcie@530000000 {
+			compatible = "apple,t8103-usb4-pcie", "apple,usb4-pcie";
+			device_type = "pci";
+
+			reg = <0x5 0x30000000 0x0 0x4000000>,
+				<0x5 0x20000000 0x0 0x202000>,
+				<0x5 0x21000000 0x0 0x4000>;
+			reg-names = "config", "rc", "port0";
+
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 850 IRQ_TYPE_LEVEL_HIGH>;
+
+			msi-controller;
+			msi-parent = <&pciec1>;
+			msi-ranges = <&aic AIC_IRQ 818 IRQ_TYPE_EDGE_RISING 32>;
+
+			iommu-map = <0x0000 &pcie1_dart_0 0 1>,
+				<0x0100 &pcie1_dart_0 1 1>,
+				<0x0200 &pcie1_dart_0 2 1>,
+				<0x0300 &pcie1_dart_0 3 1>,
+				<0x0400 &pcie1_dart_0 4 1>,
+				<0x0500 &pcie1_dart_0 5 1>,
+				<0x0600 &pcie1_dart_0 6 1>,
+				<0x0700 &pcie1_dart_0 7 1>,
+				<0x0800 &pcie1_dart_0 8 1>,
+				<0x0900 &pcie1_dart_0 9 1>,
+				<0x0a00 &pcie1_dart_0 10 1>,
+				<0x0b00 &pcie1_dart_0 11 1>,
+				<0x0c00 &pcie1_dart_0 12 1>,
+				<0x0d00 &pcie1_dart_0 13 1>,
+				<0x0e00 &pcie1_dart_0 14 1>,
+				<0x0f00 &pcie1_dart_0 15 1>,
+				<0x1000 &pcie1_dart_0 16 1>,
+				<0x1100 &pcie1_dart_0 17 1>,
+				<0x1200 &pcie1_dart_0 18 1>,
+				<0x1300 &pcie1_dart_0 19 1>,
+				<0x1400 &pcie1_dart_0 20 1>,
+				<0x1500 &pcie1_dart_0 21 1>,
+				<0x1600 &pcie1_dart_0 22 1>,
+				<0x1700 &pcie1_dart_0 23 1>,
+				<0x1800 &pcie1_dart_0 24 1>,
+				<0x1900 &pcie1_dart_0 25 1>,
+				<0x1a00 &pcie1_dart_0 26 1>,
+				<0x1b00 &pcie1_dart_0 27 1>,
+				<0x1c00 &pcie1_dart_0 28 1>,
+				<0x1d00 &pcie1_dart_0 29 1>,
+				<0x1e00 &pcie1_dart_0 30 1>,
+				<0x1f00 &pcie1_dart_0 31 1>,
+				<0x2000 &pcie1_dart_0 32 1>,
+				<0x2100 &pcie1_dart_0 33 1>,
+				<0x2200 &pcie1_dart_0 34 1>,
+				<0x2300 &pcie1_dart_0 35 1>,
+				<0x2400 &pcie1_dart_0 36 1>,
+				<0x2500 &pcie1_dart_0 37 1>,
+				<0x2600 &pcie1_dart_0 38 1>,
+				<0x2700 &pcie1_dart_0 39 1>,
+				<0x2800 &pcie1_dart_0 40 1>,
+				<0x2900 &pcie1_dart_0 41 1>,
+				<0x2a00 &pcie1_dart_0 42 1>,
+				<0x2b00 &pcie1_dart_0 43 1>,
+				<0x2c00 &pcie1_dart_0 44 1>,
+				<0x2d00 &pcie1_dart_0 45 1>,
+				<0x2e00 &pcie1_dart_0 46 1>,
+				<0x2f00 &pcie1_dart_0 47 1>,
+				<0x3000 &pcie1_dart_0 48 1>,
+				<0x3100 &pcie1_dart_0 49 1>,
+				<0x3200 &pcie1_dart_0 50 1>,
+				<0x3300 &pcie1_dart_0 51 1>,
+				<0x3400 &pcie1_dart_0 52 1>,
+				<0x3500 &pcie1_dart_0 53 1>,
+				<0x3600 &pcie1_dart_0 54 1>,
+				<0x3700 &pcie1_dart_0 55 1>,
+				<0x3800 &pcie1_dart_0 56 1>,
+				<0x3900 &pcie1_dart_0 57 1>,
+				<0x3a00 &pcie1_dart_0 58 1>,
+				<0x3b00 &pcie1_dart_0 59 1>,
+				<0x3c00 &pcie1_dart_0 60 1>,
+				<0x3d00 &pcie1_dart_0 61 1>,
+				<0x3e00 &pcie1_dart_0 62 1>,
+				<0x3f00 &pcie1_dart_0 63 1>;
+			iommu-map-mask = <0xff00>;
+
+			external-facing;
+
+			#address-cells = <3>;
+			#size-cells = <2>;
+
+			ranges = <0x43000000   0x5 0x80000000   0x5 0x80000000   0x0 0x80000000
+                      		  0x02000000   0x0 0x00100000   0x6 0x00100000   0x0 0x3ff00000
+                      		  0x42000000   0x0 0x40000000   0x6 0x40000000   0x0 0x40000000>;
+
+            		bus-range = <0x00 0x3f>;
+
+			power-domains = <&ps_atc1_pcie>;
+
+			port10: pci@0,0 {
+				device_type = "pci";
+				reg = <0x0 0x0 0x0 0x0 0x0>;
+
+				#address-cells = <3>;
+				#size-cells = <2>;
+				ranges;
+
+				interrupt-controller;
+				#interrupt-cells = <1>;
+
+				#clock-cells = <0>;
+
+				interrupt-map-mask = <0 0 0 7>;
+				interrupt-map = <0 0 0 1 &port10 0 0 0 0>,
+						<0 0 0 2 &port10 0 0 0 1>,
+						<0 0 0 3 &port10 0 0 0 2>,
+						<0 0 0 4 &port10 0 0 0 3>;
+
+				thunderbolt-protocol-adapter;
+			};
 		};
 
 		pcie0_dart_0: iommu@681008000 {

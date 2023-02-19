@@ -17,6 +17,8 @@
 		wifi0 = &wifi0;
 		atcphy0 = &atcphy0;
 		atcphy1 = &atcphy1;
+		acio1 = &acio1;
+		pciec1 = &pciec1;
 	};
 
 	chosen {
@@ -107,6 +109,12 @@
 						remote-endpoint = <&typec1_usb_ss>;
 					};
 				};
+				port@2 {
+					reg = <2>;
+					typec1_con_tbt: endpoint {
+						remote-endpoint = <&acio1_tbt>;
+					};
+				};
 			};
 		};
 	};
@@ -142,6 +150,46 @@
 	port {
 		typec1_usb_ss: endpoint {
 			remote-endpoint = <&typec1_con_ss>;
+		};
+	};
+};
+
+/* Thunderbolt NHIs */
+&acio1 {
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/* 1: USB4 port */
+		port@1 {
+			reg = <1>;
+			acio1_tbt: endpoint {
+				remote-endpoint = <&typec1_con_tbt>;
+			};
+		};
+
+		/* 2: unused(?) USB4 port */
+
+		/* 3: PCIe */
+		port@3 {
+			reg = <3>;
+			acio1_pcie: endpoint {
+				remote-endpoint = <&typec1_con_pcie>;
+			};
+		};
+
+		/* 4: USB3 */
+		/* 5: DP0 */
+		/* 6: DP1 */
+		/* 7: NHI */
+
+	};
+};
+
+&port10 {
+	port {
+		typec1_con_pcie: endpoint {
+			remote-endpoint = <&acio1_pcie>;
 		};
 	};
 };
