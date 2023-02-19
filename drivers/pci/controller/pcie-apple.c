@@ -436,6 +436,12 @@ static irqreturn_t apple_pcie_port_irq(int irq, void *data)
 		port->link_up = false;
 		complete(&port->event);
 		break;
+	case PORT_INT_TUNNEL_ERR:
+		dev_err_ratelimited(port->pcie->dev, "Tunnel error on %pOF\n",
+				    port->np);
+		port->link_up = false;
+		complete(&port->event);
+		break;
 	default:
 		return IRQ_NONE;
 	}
@@ -451,6 +457,7 @@ static int apple_pcie_port_register_irqs(struct apple_pcie_port *port)
 	} port_irqs[] = {
 		{ PORT_INT_LINK_UP,	"Link up",	},
 		{ PORT_INT_LINK_DOWN,	"Link down",	},
+		{ PORT_INT_TUNNEL_ERR,	"Tunnel error",	},
 	};
 	int i;
 
