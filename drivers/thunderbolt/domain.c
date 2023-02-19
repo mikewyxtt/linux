@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/idr.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <linux/random.h>
@@ -866,9 +867,16 @@ int tb_domain_disconnect_all_paths(struct tb *tb)
 	return bus_for_each_dev(&tb_bus_type, NULL, tb, disconnect_xdomain);
 }
 
+DEFINE_MUTEX(tb_domain_init_lock);
+static unsigned int tb_domain_init_count = 0;
+
 int tb_domain_init(void)
 {
 	int ret;
+
+	mutex_lock(&tb_domain_init_lock);
+	if (tb_domain_init_count)
+		goto inc_and_unlock;
 
 	tb_debugfs_init();
 	tb_acpi_init();
@@ -880,6 +888,9 @@ int tb_domain_init(void)
 	if (ret)
 		goto err_xdomain;
 
+inc_and_unlock:
+	tb_domain_init_count++;
+	mutex_unlock(&tb_domain_init_lock);
 	return 0;
 
 err_xdomain:
@@ -893,10 +904,17 @@ err_acpi:
 
 void tb_domain_exit(void)
 {
-	bus_unregister(&tb_bus_type);
-	ida_destroy(&tb_domain_ida);
-	tb_nvm_exit();
-	tb_xdomain_exit();
-	tb_acpi_exit();
-	tb_debugfs_exit();
+	mutex_lock(&tb_domain_init_lock);
+	tb_domain_init_count--;
+
+	if (!tb_domain_init_count) {
+		bus_unregister(&tb_bus_type);
+		ida_destroy(&tb_domain_ida);
+		tb_nvm_exit();
+		tb_xdomain_exit();
+		tb_acpi_exit();
+		tb_debugfs_exit();
+	}
+
+	mutex_unlock(&tb_domain_init_lock);
 }
