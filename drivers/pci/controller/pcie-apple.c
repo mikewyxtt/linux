@@ -153,6 +153,7 @@ struct apple_pcie_port {
 	struct irq_domain	*domain;
 	struct list_head	entry;
 	struct completion	event;
+	bool			link_up;
 	DECLARE_BITMAP(sid_map, MAX_RID2SID);
 	int			sid_map_sz;
 	int			idx;
@@ -420,11 +421,14 @@ static irqreturn_t apple_pcie_port_irq(int irq, void *data)
 	case PORT_INT_LINK_UP:
 		dev_info_ratelimited(port->pcie->dev, "Link up on %pOF\n",
 				     port->np);
+		port->link_up = true;
 		complete(&port->event);
 		break;
 	case PORT_INT_LINK_DOWN:
 		dev_info_ratelimited(port->pcie->dev, "Link down on %pOF\n",
 				     port->np);
+		port->link_up = false;
+		complete(&port->event);
 		break;
 	default:
 		return IRQ_NONE;
@@ -645,8 +649,8 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 	WARN_ON(ret);
 
 	writel_relaxed(PORT_LTSSMCTL_START, port->base + PORT_LTSSMCTL);
-
-	if (!wait_for_completion_timeout(&port->event, HZ / 10))
+	wait_for_completion_timeout(&port->event, HZ / 10);
+	if (!port->link_up)
 		dev_warn(pcie->dev, "%pOF link didn't come up\n", np);
 
 	return 0;
