@@ -23,6 +23,7 @@
 
 #include "nhi.h"
 #include "nhi_regs.h"
+#include "nhi_icl.h"
 #include "tb.h"
 
 #define RING_TYPE(ring) ((ring)->is_tx ? "TX ring" : "RX ring")
@@ -1378,6 +1379,16 @@ static const struct dev_pm_ops nhi_pm_ops = {
 	.complete = nhi_complete,
 	.runtime_suspend = nhi_runtime_suspend,
 	.runtime_resume = nhi_runtime_resume,
+};
+
+
+const struct tb_nhi_ops icl_nhi_ops = {
+	.init = icl_nhi_resume,
+	.suspend_noirq = icl_nhi_suspend_noirq,
+	.resume_noirq = icl_nhi_resume,
+	.runtime_suspend = icl_nhi_suspend,
+	.runtime_resume = icl_nhi_resume,
+	.shutdown = icl_nhi_shutdown,
 };
 
 static struct pci_device_id nhi_ids[] = {
