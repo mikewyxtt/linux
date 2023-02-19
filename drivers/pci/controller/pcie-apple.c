@@ -18,6 +18,7 @@
  * Author: Marc Zyngier <maz@kernel.org>
  */
 
+#include <linux/clk-provider.h>
 #include <linux/gpio/consumer.h>
 #include <linux/kernel.h>
 #include <linux/iopoll.h>
@@ -155,6 +156,7 @@ struct apple_pcie_port {
 	DECLARE_BITMAP(sid_map, MAX_RID2SID);
 	int			sid_map_sz;
 	int			idx;
+	struct clk_hw		clk;
 };
 
 static void rmw_set(u32 set, void __iomem *addr)
@@ -511,6 +513,39 @@ static u32 apple_pcie_rid2sid_write(struct apple_pcie_port *port,
 	return readl_relaxed(port->base + PORT_RID2SID(idx));
 }
 
+#define clkhw_to_port(_hw) container_of(_hw, struct apple_pcie_port, clk)
+
+static int apple_pcie_appclk_enable(struct clk_hw *hw)
+{
+	struct apple_pcie_port *port = clkhw_to_port(hw);
+
+	rmw_set(PORT_APPCLK_EN, port->base + PORT_APPCLK);
+	rmw_clear(PORT_APPCLK_CGDIS, port->base + PORT_APPCLK);
+
+	return 0;
+}
+
+static int apple_pcie_appclk_is_enabled(struct clk_hw *hw)
+{
+	struct apple_pcie_port *port = clkhw_to_port(hw);
+
+	return !!(readl_relaxed(port->base + PORT_APPCLK) & PORT_APPCLK_EN);
+}
+
+static void apple_pcie_appclk_disable(struct clk_hw *hw)
+{
+	struct apple_pcie_port *port = clkhw_to_port(hw);
+
+	rmw_set(PORT_APPCLK_CGDIS, port->base + PORT_APPCLK);
+	rmw_clear(PORT_APPCLK_EN, port->base + PORT_APPCLK);
+}
+
+static const struct clk_ops apple_pcie_appclk_ops = {
+	.enable = apple_pcie_appclk_enable,
+	.disable = apple_pcie_appclk_disable,
+	.is_enabled = apple_pcie_appclk_is_enabled,
+};
+
 static int apple_pcie_setup_port(struct apple_pcie *pcie,
 				 struct device_node *np)
 {
@@ -519,6 +554,10 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 	struct gpio_desc *reset;
 	u32 stat, idx;
 	int ret, i;
+	struct clk_init_data clk_init = {
+		.ops = &apple_pcie_appclk_ops,
+		.num_parents = 0,
+	};
 
 	reset = devm_fwnode_gpiod_get(pcie->dev, of_fwnode_handle(np), "reset",
 				      GPIOD_OUT_LOW, "PERST#");
@@ -542,7 +581,21 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 	if (IS_ERR(port->base))
 		return PTR_ERR(port->base);
 
-	rmw_set(PORT_APPCLK_EN, port->base + PORT_APPCLK);
+	/*
+	 * The clock must be enabled here and is never disabled afterwards.
+	 * Instead of adding more code to manually call clk_prepare_enable
+	 * it's just marked as critical for now.
+	 */
+	clk_init.flags = CLK_IS_CRITICAL;
+	clk_init.name = devm_kasprintf(pcie->dev, GFP_KERNEL, "%pOF", np);
+	port->clk.init = &clk_init;
+	ret = of_clk_hw_register(port->np, &port->clk);
+	if (ret)
+		return ret;
+
+	ret = of_clk_add_hw_provider(port->np, of_clk_hw_simple_get, &port->clk);
+	if (ret)
+		return ret;
 
 	/* Assert PERST# before setting up the clock */
 	gpiod_set_value(reset, 1);
@@ -569,7 +622,6 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 	}
 
 	rmw_clear(PORT_REFCLK_CGDIS, port->base + PORT_REFCLK);
-	rmw_clear(PORT_APPCLK_CGDIS, port->base + PORT_APPCLK);
 
 	ret = apple_pcie_port_setup_irq(port);
 	if (ret)
