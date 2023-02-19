@@ -4835,6 +4835,21 @@ static int pci_quirk_brcm_acs(struct pci_dev *dev, u16 acs_flags)
 		PCI_ACS_SV | PCI_ACS_RR | PCI_ACS_CR | PCI_ACS_UF);
 }
 
+
+static int pci_quirk_apple_usb4_pcie_acs(struct pci_dev *dev, u16 acs_flags)
+{
+	/*
+	 * USB4 1.0, 11.2.3 PCIe Transaction Layer requires that USB4 PCIe
+	 * Root Ports support ACS Source Validation, ACS Translation Blocking,
+	 * and ACS P2P Egress Control, or "an implementation-specific mechanism
+	 * that is more appropriate for the architecture of the Host".
+	 * Apple either decided for the latter or just didn't add the ACS
+	 * capability to their root port.
+	 */
+	return pci_acs_ctrl_enabled(acs_flags,
+		PCI_ACS_SV | PCI_ACS_TB | PCI_ACS_RR | PCI_ACS_CR | PCI_ACS_UF);
+}
+
 static const struct pci_dev_acs_enabled {
 	u16 vendor;
 	u16 device;
@@ -4980,6 +4995,8 @@ static const struct pci_dev_acs_enabled {
 	{ PCI_VENDOR_ID_NXP, 0x8d9b, pci_quirk_nxp_rp_acs },
 	/* Zhaoxin Root/Downstream Ports */
 	{ PCI_VENDOR_ID_ZHAOXIN, PCI_ANY_ID, pci_quirk_zhaoxin_pcie_ports_acs },
+	/* Apple Silicon USB4/Thunderbolt Root Ports */
+	{ PCI_VENDOR_ID_APPLE, 0x1010, pci_quirk_apple_usb4_pcie_acs },
 	{ 0 }
 };
 
