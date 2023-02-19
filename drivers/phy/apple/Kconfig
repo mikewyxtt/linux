@@ -21,3 +21,14 @@ config PHY_APPLE_ATC_CROSSBAR
 
 	  To compile this driver as a module, chose M here: the module will be
 	  called phy-apple-atc-display-crossbar.
+
+config PHY_APPLE_ATC_DPIN
+	tristate "Apple Type-C PHY USB4 DisplayPort Protocol Adapter"
+	depends on ARCH_APPLE || COMPILE_TEST
+	default ARCH_APPLE
+	help
+	  Enable this to add support for the Type-C PHY's DisplayPort protocol
+	  adapter used to tunnel video signal over USB4/Thunderbolt.
+
+	  To compile this driver as a module, chose M here: the module will be
+	  called phy-apple-atc-dpin.

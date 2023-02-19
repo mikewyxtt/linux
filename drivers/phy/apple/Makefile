@@ -7,3 +7,6 @@ phy-apple-atc-$(CONFIG_TRACING)	+= trace.o
 
 obj-$(CONFIG_PHY_APPLE_ATC_CROSSBAR)	+= phy-apple-atc-display-crossbar.o
 phy-apple-atc-display-crossbar-y	:= atc-display-crossbar.o
+
+obj-$(CONFIG_PHY_APPLE_ATC_DPIN)	+= phy-apple-atc-dpin.o
+phy-apple-atc-dpin-y			:= atc-dpin.o
