@@ -21,6 +21,15 @@ if USB4
 config USB4_PROTOCOL_ADAPTER_NOTIFICATIONS
 	bool
 
+config USB4_APPLE_SOC
+	bool "Enable Apple Silicon USB4/Thunderbolt Support"
+	depends on ARCH_APPLE || COMPILE_TEST
+	depends on OF && APPLE_RTKIT
+	select USB4_PROTOCOL_ADAPTER_NOTIFICATIONS
+	help
+	  Enable USB4 and Thunderbolt support for Apple Silicon SoCs such as
+	  the M1.
+
 config USB4_DEBUGFS_WRITE
 	bool "Enable write by debugfs to configuration spaces (DANGEROUS)"
 	help
