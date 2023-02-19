@@ -139,7 +139,6 @@ struct apple_pcie {
 	struct irq_domain	*domain;
 	unsigned long		*bitmap;
 	struct list_head	ports;
-	struct completion	event;
 	struct irq_fwspec	fwspec;
 	u32			nvecs;
 	struct device		**pd_dev;
@@ -153,6 +152,7 @@ struct apple_pcie_port {
 	void __iomem		*base;
 	struct irq_domain	*domain;
 	struct list_head	entry;
+	struct completion	event;
 	DECLARE_BITMAP(sid_map, MAX_RID2SID);
 	int			sid_map_sz;
 	int			idx;
@@ -420,7 +420,7 @@ static irqreturn_t apple_pcie_port_irq(int irq, void *data)
 	case PORT_INT_LINK_UP:
 		dev_info_ratelimited(port->pcie->dev, "Link up on %pOF\n",
 				     port->np);
-		complete_all(&port->pcie->event);
+		complete(&port->event);
 		break;
 	case PORT_INT_LINK_DOWN:
 		dev_info_ratelimited(port->pcie->dev, "Link down on %pOF\n",
@@ -639,14 +639,14 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 	port->sid_map_sz = i;
 
 	list_add_tail(&port->entry, &pcie->ports);
-	init_completion(&pcie->event);
+	init_completion(&port->event);
 
 	ret = apple_pcie_port_register_irqs(port);
 	WARN_ON(ret);
 
 	writel_relaxed(PORT_LTSSMCTL_START, port->base + PORT_LTSSMCTL);
 
-	if (!wait_for_completion_timeout(&pcie->event, HZ / 10))
+	if (!wait_for_completion_timeout(&port->event, HZ / 10))
 		dev_warn(pcie->dev, "%pOF link didn't come up\n", np);
 
 	return 0;
