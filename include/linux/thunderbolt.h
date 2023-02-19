@@ -661,4 +661,162 @@ static inline struct device *tb_ring_dma_device(struct tb_ring *ring)
 	return ring->nhi->dev;
 }
 
+struct tb_protocol_adapter;
+typedef int (*tb_protocol_adapter_activate_t)(
+	struct tb_protocol_adapter *adapter);
+typedef void (*tb_protocol_adapter_deactivate_t)(
+	struct tb_protocol_adapter *adapter);
+
+/**
+ * struct tb_protocol_adapter_desc - For use with tb_protocol_adapter_register
+ * @fwnode: fwnode linked to this protcol adapter
+ * @activate: Callback called when a tunnel has been established (optional)
+ * @deactivate: Callback called when a tunnel has been deactivated (optional)
+ * @driver_data: Private driver data
+ */
+struct tb_protocol_adapter_desc {
+	struct fwnode_handle *fwnode;
+	tb_protocol_adapter_activate_t activate;
+	tb_protocol_adapter_deactivate_t deactivate;
+	void *driver_data;
+};
+
+#if IS_ENABLED(CONFIG_USB4_PROTOCOL_ADAPTER_NOTIFICATIONS)
+
+/**
+ * tb_protocol_adapter_register() - Register a protocol adapter
+ * @parent: Parent device for the protocol adapter
+ * @desc: Description of the protocol adapter
+ *
+ * A protocol adapter translates between USB4/Thunderbolt traffic and another
+ * protocol such as DisplayPort or PCI Express. On platforms where no in-band
+ * notification to signal that a path between the adapter and a downstream
+ * device has been established this function can be used to register a
+ * protocol adapter to receive out-of-band notifications.
+ */
+struct tb_protocol_adapter *
+tb_protocol_adapter_register(struct device *parent,
+			     struct tb_protocol_adapter_desc *desc);
+
+/**
+ * tb_protocol_adapter_unregister() - Register a protocol adapter
+ * @adapter: The adapter returned by tb_protocol_adapter_register()
+ *
+ * Unregister a protocol adapter previously registered with
+ * tb_protocol_adapter_register().
+ */
+void tb_protocol_adapter_unregister(struct tb_protocol_adapter *adapter);
+
+/**
+ * tb_protocol_adapter_get() - Find a protocol adapter from its fwnode
+ * @fwnode: The protocol adapter's firmware node
+ *
+ * Finds and returns a protocol adapter linked with @fwnode. The reference
+ * counter of the found adapter is incremented and should be released with
+ * tb_protocol_adapter_put() eventually.
+ * Returns ERR_PTR(-EPROBE_DEFER) is the adapter exists but hasn't been proved
+ * yet and NULL if the fwnode is not linked with any adapter.
+ */
+struct tb_protocol_adapter *
+tb_protocol_adapter_get(struct fwnode_handle *fwnode);
+
+/**
+ * devm_tb_protocol_adapter_get() - Devres managed tb_protocol_adapter_get()
+ * @dev: The device which uses the protocol adapter
+ * @fwnode: The protocol adapter's firmware node
+ *
+ * See tb_protocol_adapter_get().
+ */
+struct tb_protocol_adapter *
+devm_tb_protocol_adapter_get(struct device *dev, struct fwnode_handle *fwnode);
+
+/**
+ * tb_protocol_adapter_put() - Devres managed tb_protocol_adapter_get()
+ * @adapter: The protocol adapter returned by tb_protocol_adapter_get
+ *
+ * Releases the handle of the protocol adapter which was previously acquired
+ * with tb_protocol_adapter_get().
+ */
+void tb_protocol_adapter_put(struct tb_protocol_adapter *adapter);
+
+/**
+ * tb_protocol_adapter_set_drvdata() - Assign private data pointer to a adapter
+ * @adapter: The protocol adapter registered with tb_protocol_adapter_register
+ * @data: Pointer to private data
+ */
+void tb_protocol_adapter_set_drvdata(struct tb_protocol_adapter *adapter,
+				     void *data);
+
+/**
+ * tb_protocol_adapter_get_drvdata() - Get private data pointer of a adapter
+ * @adapter: The protocol adapter registered with tb_protocol_adapter_register
+ */
+void *tb_protocol_adapter_get_drvdata(struct tb_protocol_adapter *adapter);
+
+/**
+ * tb_protocol_adapter_activate() - Notify adapter of a newly established tunnel
+ * @adapter: The protocol adapter acquired with tb_protocol_adapter_get()
+ */
+int tb_protocol_adapter_activate(struct tb_protocol_adapter *adapter);
+
+/**
+ * tb_protocol_adapter_activate() - Notify adapter of a deactivated tunnel
+ * @adapter: The protocol adapter acquired with tb_protocol_adapter_get()
+ */
+void tb_protocol_adapter_deactivate(struct tb_protocol_adapter *adapter);
+
+#else
+
+static inline struct tb_protocol_adapter *
+tb_protocol_adapter_register(struct device *parent,
+			     struct tb_protocol_adapter_desc *adapter)
+{
+	return ERR_PTR(-ENODEV);
+}
+
+static inline void
+tb_protocol_adapter_unregister(struct tb_protocol_adapter *adapter)
+{
+}
+
+static inline struct tb_protocol_adapter *
+tb_protocol_adapter_get(struct fwnode_handle *fwnode)
+{
+	return ERR_PTR(-ENODEV);
+}
+
+static inline struct tb_protocol_adapter *
+devm_tb_protocol_adapter_get(struct device *dev, struct fwnode_handle *fwnode)
+{
+	return ERR_PTR(-ENODEV);
+}
+
+static inline void tb_protocol_adapter_put(struct tb_protocol_adapter *adapter)
+{
+}
+
+static inline void
+tb_protocol_adapter_set_drvdata(struct tb_protocol_adapter *adapter, void *data)
+{
+}
+
+static inline void *
+tb_protocol_adapter_get_drvdata(struct tb_protocol_adapter *adapter)
+{
+	return ERR_PTR(-ENXIO);
+}
+
+static inline int
+tb_protocol_adapter_activate(struct tb_protocol_adapter *adapter)
+{
+	return -ENXIO;
+}
+
+static inline void
+tb_protocol_adapter_deactivate(struct tb_protocol_adapter *adapter)
+{
+}
+
+#endif /* IS_ENABLED(CONFIG_USB4_PROTOCOL_ADAPTER_NOTIFICATIONS) */
+
 #endif /* THUNDERBOLT_H_ */

@@ -18,6 +18,9 @@ menuconfig USB4
 
 if USB4
 
+config USB4_PROTOCOL_ADAPTER_NOTIFICATIONS
+	bool
+
 config USB4_DEBUGFS_WRITE
 	bool "Enable write by debugfs to configuration spaces (DANGEROUS)"
 	help
