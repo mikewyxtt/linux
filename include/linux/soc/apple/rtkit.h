@@ -123,6 +123,8 @@ int apple_rtkit_wake(struct apple_rtkit *rtk);
  */
 int apple_rtkit_shutdown(struct apple_rtkit *rtk);
 
+int apple_rtkit_full_shutdown(struct apple_rtkit *rtk);
+
 /*
  * Checks if RTKit is running and ready to handle messages.
  */
