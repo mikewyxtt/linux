@@ -760,6 +760,32 @@ static struct notifier_block apple_pcie_nb = {
 	.notifier_call = apple_pcie_bus_notifier,
 };
 
+static DEFINE_MUTEX(apple_pcie_bus_notifier_lock);
+static unsigned int apple_pcie_bus_notifier_count = 0;
+
+static int apple_pcie_register_bus_notifier(void)
+{
+	int ret = 0;
+
+	mutex_lock(&apple_pcie_bus_notifier_lock);
+	if (apple_pcie_bus_notifier_count == 0)
+		ret = bus_register_notifier(&pci_bus_type, &apple_pcie_nb);
+	if (!ret)
+		apple_pcie_bus_notifier_count++;
+	mutex_unlock(&apple_pcie_bus_notifier_lock);
+
+	return ret;
+}
+
+static void apple_pcie_unregister_bus_notifier(void)
+{
+	mutex_lock(&apple_pcie_bus_notifier_lock);
+	apple_pcie_bus_notifier_count--;
+	if (!apple_pcie_bus_notifier_count)
+		bus_unregister_notifier(&pci_bus_type, &apple_pcie_nb);
+	mutex_unlock(&apple_pcie_bus_notifier_lock);
+}
+
 static int apple_pcie_init(struct pci_config_window *cfg)
 {
 	struct device *dev = cfg->parent;
@@ -799,13 +825,13 @@ static int apple_pcie_probe(struct platform_device *pdev)
 {
 	int ret;
 
-	ret = bus_register_notifier(&pci_bus_type, &apple_pcie_nb);
+	ret = apple_pcie_register_bus_notifier();
 	if (ret)
 		return ret;
 
 	ret = pci_host_common_probe(pdev);
 	if (ret)
-		bus_unregister_notifier(&pci_bus_type, &apple_pcie_nb);
+		apple_pcie_unregister_bus_notifier();
 
 	return ret;
 }
