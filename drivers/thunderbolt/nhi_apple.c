@@ -607,26 +607,34 @@ static void apple_cio_start(struct apple_cio *acio)
 	pm_runtime_forbid(acio->dev);
 
 	ret = phy_power_on(acio->phy);
-	if (ret)
-		return;
+	if (ret) {
+		dev_err(acio->dev, "failed to power on PHY: %d\n", ret);
+		goto err_pm;
+	}
 	dev_dbg(acio->dev, "PHY is powered\n");
 
 	// Create iommu
 	ret = of_platform_populate(acio->np, NULL, NULL, acio->dev);
-	if (ret)
-		return;
+	if (ret) {
+		dev_err(acio->dev, "failed to populate children: %d\n", ret);
+		goto err_phy;
+	}
 	dev_dbg(acio->dev, "IOMMU is probed\n");
 
 	// Create dev for unknown iommu stream
 	ret = apple_cio_create_fake_iommu_dev(acio);
-	if (ret)
-		return;
+	if (ret) {
+		dev_err(acio->dev, "failed to create dummy IOMMU device: %d\n", ret);
+		goto err_platform_depopulate;
+	}
 	dev_dbg(acio->dev, "dummy IOMMU dev is ready\n");
 
 	// Create main NHI dev
 	ret = apple_cio_create_nhi_dev(acio);
-	if (ret)
-		return;
+	if (ret) {
+		dev_err(acio->dev, "failed to create NHI dev: %d\n", ret);
+		goto err_destroy_dummy_dev;
+	}
 	dev_dbg(acio->dev, "main NHI dev is ready\n");
 	platform_set_drvdata(acio->nhi_pdev, acio);
 
@@ -634,29 +642,29 @@ static void apple_cio_start(struct apple_cio *acio)
 	writel(-1, acio->regs_nhi + APPLE_CIO_NHI_IRQ_STATUS);
 	writel(APPLE_CIO_M3_CTRL_START, acio->regs_m3 + APPLE_CIO_M3_CTRL);
 
-	ret = readl_poll_timeout(acio->regs_m3 + APPLE_CIO_M3_STAT, state,
-				 state & APPLE_CIO_M3_STAT_STATE, 100, 500000);
-	if (ret < 0) {
-		dev_err_probe(acio->dev, ret, "M3 firmware failed to boot\n");
-		return;
-	}
-	dev_dbg(acio->dev, "M3 firmware is ready\n");
-
 	acio->rtk = apple_rtkit_init(acio->dev, acio, NULL, 0,
 				     &apple_cio_rtkit_ops);
 	if (IS_ERR(acio->rtk)) {
 		dev_err_probe(acio->dev, PTR_ERR(acio->rtk),
 			      "Failed to initialize RTKit");
-		return;
+		goto err_destroy_nhi_dev;
 	}
 	dev_dbg(acio->dev, "M3 rtkit is initialized\n");
 
 	ret = apple_rtkit_boot(acio->rtk);
 	if (ret) {
 		dev_err_probe(acio->dev, ret, "M3 RTKit failed to boot");
-		return;
+		goto err_shutdown_rtkit;
 	}
 	dev_dbg(acio->dev, "M3 rtkit has booted\n");
+
+	ret = readl_poll_timeout(acio->regs_m3 + APPLE_CIO_M3_STAT, state,
+				 state & APPLE_CIO_M3_STAT_STATE, 100, 500000);
+	if (ret < 0) {
+		dev_err_probe(acio->dev, ret, "M3 firmware failed to get ready\n");
+		goto err_shutdown_rtkit;
+	}
+	dev_dbg(acio->dev, "M3 firmware is ready\n");
 
 	apple_cio_apply_tunable(&acio->tunable_m3, acio->regs_m3);
 	apple_cio_apply_tunable(&acio->tunable_nhi, acio->regs_nhi);
@@ -669,7 +677,7 @@ static void apple_cio_start(struct apple_cio *acio)
 		dev_err_probe(acio->dev, -EINVAL,
 			      "Ring IRQs (%zd) != HOP_COUNT (%d)",
 			      acio->n_rings, acio->nhi.hop_count);
-		return;
+		goto err_shutdown_rtkit;
 	}
 
 	acio->nhi.dev = &acio->nhi_pdev->dev;
@@ -677,14 +685,15 @@ static void apple_cio_start(struct apple_cio *acio)
 	if (!acio->tb) {
 		dev_err_probe(acio->dev, -ENODEV,
 			      "failed to init software connection manager\n");
-		return;
+		goto err_shutdown_rtkit;
 	}
 	dev_dbg(acio->dev, "tb_probe is done\n");
 
 	ret = tb_domain_add(acio->tb);
 	if (ret) {
 		dev_err_probe(acio->dev, ret, "failed to add TB domain\n");
-		return;
+		tb_domain_put(acio->tb);
+		goto err_shutdown_rtkit;
 	}
 	dev_dbg(acio->dev, "tb domain is added\n");
 
@@ -693,9 +702,9 @@ static void apple_cio_start(struct apple_cio *acio)
 		tb_switch_find_vse_cap(acio->tb->root_switch, TB_VSE_CAP_APPLE);
 
 	if (!cap_apple) {
-		dev_err(acio->dev, "blah");
+		dev_err(acio->dev, "Unable to find VSE Apple capability\n");
 		mutex_unlock(&acio->tb->lock);
-		return;
+		goto err_remove_tb_domain;
 	}
 
 	dev_warn(acio->dev, "VSE Apple offset: %x\n", cap_apple);
@@ -703,16 +712,41 @@ static void apple_cio_start(struct apple_cio *acio)
 	ret = tb_sw_write(acio->tb->root_switch, &acio->target_cable_info,
 			  TB_CFG_SWITCH,
 			  cap_apple + TB_VSE_CAP_APPLE_CABLE_INFO, 1);
-	if (ret)
+	if (ret) {
 		dev_warn(acio->dev, "setting VSE Apple cable info failed: %d\n",
 			 ret);
-	acio->current_cable_info = acio->target_cable_info;
+		mutex_unlock(&acio->tb->lock);
+		goto err_remove_tb_domain;
+	}
 
-	dev_warn(acio->dev, "setting VSE Apple cable info done: 0x%x\n",
+	acio->current_cable_info = acio->target_cable_info;
+	dev_dbg(acio->dev, "setting VSE Apple cable info done: 0x%x\n",
 		 acio->target_cable_info);
 	mutex_unlock(&acio->tb->lock);
 
 	dev_dbg(acio->dev, "NHI is up\n");
+	return;
+
+err_remove_tb_domain:
+	tb_domain_remove(acio->tb);
+err_shutdown_rtkit:
+	ret = apple_rtkit_full_shutdown(acio->rtk);
+	if (ret)
+		dev_warn(acio->dev, "Failed to shutdown M3 RTKit\n");
+	apple_rtkit_free(acio->rtk);
+err_destroy_nhi_dev:
+	of_platform_device_destroy(&acio->nhi_pdev->dev, NULL);
+err_destroy_dummy_dev:
+	iommu_detach_device(acio->iommu_dom, &acio->iommu_pdev->dev);
+	iommu_domain_free(acio->iommu_dom);
+	of_platform_device_destroy(&acio->iommu_pdev->dev, NULL);
+err_platform_depopulate:
+	of_platform_depopulate(acio->dev);
+err_phy:
+	phy_power_off(acio->phy);
+err_pm:
+	pm_runtime_allow(acio->dev);
+	pm_runtime_put_sync_suspend(acio->dev);
 }
 
 static void apple_cio_stop(struct apple_cio *acio)
