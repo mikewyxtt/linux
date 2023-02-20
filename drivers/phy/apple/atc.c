@@ -796,15 +796,6 @@ static int atcphy_cio_power_on(struct apple_atcphy *atcphy)
 	u32 reg;
 	int ret;
 
-	/* enable all reset lines */
-	dev_err(atcphy->dev, "cio reset now\n");
-	core_clear32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_PHY_RESET_N);
-	core_set32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_CLAMP_EN);
-	core_clear32(atcphy, ATCPHY_MISC, ATCPHY_MISC_RESET_N);
-	core_clear32(atcphy, ATCPHY_POWER_CTRL, ATCPHY_POWER_APB_RESET_N);
-
-	udelay(1000);
-
 	dev_err(atcphy->dev, "cio power on now\n");
 	core_set32(atcphy, ATCPHY_MISC, ATCPHY_MISC_RESET_N);
 
@@ -2070,38 +2061,6 @@ static int atcphy_probe_switch(struct apple_atcphy *atcphy)
 	return PTR_ERR_OR_ZERO(typec_switch_register(atcphy->dev, &sw_desc));
 }
 
-static void atcphy_enable_usb4(struct apple_atcphy *atcphy)
-{
-	int ret;
-
-	return;
-
-	// ¯\_(ツ)_/¯
-	printk("###### before: %x\n", readl(atcphy->regs.pmgr));
-	set32(atcphy->regs.pmgr, 1);
-	printk("###### after: %x\n", readl(atcphy->regs.pmgr));
-	msleep(1000);
-	printk("###### after sleep: %x\n", readl(atcphy->regs.pmgr));
-
-	ret = of_platform_populate(atcphy->np, NULL, NULL, atcphy->dev);
-	if (ret) {
-		dev_err(atcphy->dev, "Failed to populate USB4 nodes with %d\n",
-			ret);
-		return;
-	}
-}
-
-static void atcphy_disable_usb4(struct apple_atcphy *atcphy)
-{
-	/*
-	 * there doesn't seem to be a way to disable the CIO "clock" again
-	 * except for shutting down the PHY so all we have to do here is ensure
-	 * that the USB4 devices are removed before that happens
-	 */
-	of_platform_depopulate(atcphy->dev);
-	// clear32(atcphy->regs.pmgr, 0);
-}
-
 static int atcphy_wait_nhi(struct apple_atcphy *atcphy)
 {
 	if (!atcphy->nhi_available)
@@ -2156,7 +2115,6 @@ static void atcphy_mux_set_work(struct work_struct *work)
 	case APPLE_ATCPHY_MODE_USB4:
 		atcphy_wait_nhi(atcphy);
 		atcphy_cio_configure(atcphy, APPLE_ATCPHY_MODE_USB4);
-		atcphy_enable_usb4(atcphy);
 		break;
 	default:
 		dev_warn(atcphy->dev, "Unknown mode %d in atcphy_mux_set\n",
@@ -2166,7 +2124,6 @@ static void atcphy_mux_set_work(struct work_struct *work)
 	case APPLE_ATCPHY_MODE_OFF:
 		atcphy->mode = APPLE_ATCPHY_MODE_OFF;
 		atcphy_disable_dp_aux(atcphy);
-		atcphy_disable_usb4(atcphy);
 		atcphy_cio_power_off(atcphy);
 	}
 
