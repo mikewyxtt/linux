@@ -31,6 +31,7 @@
 #include <linux/of_irq.h>
 #include <linux/pci-ecam.h>
 #include <linux/pm_domain.h>
+#include <linux/reset.h>
 #include <linux/thunderbolt.h>
 
 /* for pci_dev_set_disconnected */
@@ -156,6 +157,7 @@ struct apple_pcie {
 	struct device_link	**pd_link;
 	int			pd_count;
 	enum apple_pcie_type	type;
+	struct reset_control	*reset;
 };
 
 struct apple_pcie_port {
@@ -709,6 +711,57 @@ out:
 	return ret;
 }
 
+static void apple_usb4_pcie_reset(struct apple_pcie_port *port)
+{
+	int ret;
+	u32 intmsk, stat;
+
+	/*
+	 * This is quite a hack to bring the controller back to a working
+	 * state without having to re-setup everything inside Linux.
+	 * As long as the following is true nothing bad should happen:
+	 * - This is a USB4 controller with only a single port
+	 * - There are no devices attached and the root port itself has been
+	 *   removed
+	 * - pci_lock_rescan_remove is held
+	 */
+
+	/* Disable all interrupts just in case we get one during reset */
+	intmsk = readl_relaxed(port->base + PORT_INTMSK);
+	writel_relaxed(0xffffffff, port->base + PORT_INTMSK);
+
+	/* Trigger the PMGR reset */
+	reset_control_reset(port->pcie->reset);
+
+	/* Restore the port */
+	rmw_set(PORT_REFCLK_EN, port->base + PORT_REFCLK);
+	rmw_set(PORT_APPCLK_EN, port->base + PORT_APPCLK);
+	rmw_clear(PORT_APPCLK_CGDIS, port->base + PORT_APPCLK);
+
+	/* The minimal Tperst-clk value is 100us (PCIe CEM r5.0, 2.9.2) */
+	usleep_range(100, 200);
+
+	/* Deassert PERST# */
+	rmw_set(PORT_PERST_OFF, port->base + PORT_PERST);
+
+	/* Wait for 100ms after PERST# deassertion (PCIe r5.0, 6.6.1) */
+	msleep(100);
+
+	ret = readl_relaxed_poll_timeout(port->base + PORT_STATUS, stat,
+					 stat & PORT_STATUS_READY, 100, 250000);
+	if (ret < 0)
+		dev_err(port->pcie->dev, "port %pOF ready wait timeout\n", port->np);
+
+	rmw_clear(PORT_REFCLK_CGDIS, port->base + PORT_REFCLK);
+
+	/* Re-enable MSI and restore the original interrupt mask */
+	writel_relaxed(lower_32_bits(DOORBELL_ADDR), port->base + PORT_MSIADDR);
+	writel_relaxed(0, port->base + PORT_MSIBASE);
+	writel_relaxed((ilog2(port->pcie->nvecs) << PORT_MSICFG_L2MSINUM_SHIFT) |
+		       PORT_MSICFG_EN, port->base + PORT_MSICFG);
+	writel_relaxed(intmsk, port->base + PORT_INTMSK);
+}
+
 static void apple_pcie_stop_tunnel(struct tb_protocol_adapter *adapter)
 {
 	struct apple_pcie_port *port = tb_protocol_adapter_get_drvdata(adapter);
@@ -734,6 +787,13 @@ static void apple_pcie_stop_tunnel(struct tb_protocol_adapter *adapter)
 	/* Disable link training and assert tunnel reset */
 	apple_pcie_stop_ltssm(port);
 	apple_pcie_reset_tunnel(port);
+
+	/*
+	 * Reset and reinitialize the entire controller. This is a bit of a hack
+	 * and assumes we really only have this single port which is always
+	 * true for the USB4 ports.
+	 */
+	apple_usb4_pcie_reset(port);
 
 	/*
 	 * Rescan the root port device since it still exists. This technically
@@ -802,6 +862,16 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie,
 					"reset", GPIOD_OUT_LOW, "PERST#");
 		if (IS_ERR(reset))
 			return PTR_ERR(reset);
+	}
+
+	if (pcie->type == APPLE_PCIE_USB4) {
+		pcie->reset = devm_reset_control_array_get_exclusive(pcie->dev);
+		if (IS_ERR(pcie->reset))
+			return PTR_ERR(pcie->reset);
+
+		ret = reset_control_deassert(pcie->reset);
+		if (ret)
+			return ret;
 	}
 
 	port = devm_kzalloc(pcie->dev, sizeof(*port), GFP_KERNEL);
