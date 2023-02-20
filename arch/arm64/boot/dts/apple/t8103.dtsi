@@ -1079,7 +1079,7 @@
 			#iommu-cells = <1>;
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ 851 IRQ_TYPE_LEVEL_HIGH>;
-			power-domains = <&ps_apcie_gp>;
+			power-domains = <&ps_atc1_usb_aon>, <&ps_atc1_pcie>;
 			clocks = <&port10>;
 		};
 
@@ -1176,7 +1176,8 @@
 
             		bus-range = <0x00 0x3f>;
 
-			power-domains = <&ps_atc1_pcie>;
+			power-domains = <&ps_atc1_usb_aon>, <&ps_atc1_pcie>;
+			resets = <&ps_atc1_pcie>;
 
 			port10: pci@0,0 {
 				device_type = "pci";
