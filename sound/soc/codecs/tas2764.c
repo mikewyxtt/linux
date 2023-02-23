@@ -361,7 +361,7 @@ static int tas2764_hw_params(struct snd_pcm_substream *substream,
 static int tas2764_write_sdout_zero_mask(struct tas2764_priv *tas2764, int bclk_ratio)
 {
 	struct snd_soc_component *component = tas2764->component;
-	int nsense_slots = bclk_ratio / 16;
+	int nsense_slots = bclk_ratio / 8;
 	u32 cropped_mask;
 	int i, ret;
 
