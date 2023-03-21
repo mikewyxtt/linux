@@ -98,6 +98,7 @@ static int __iommu_attach_group(struct iommu_domain *domain,
 				struct iommu_group *group);
 static int __iommu_group_set_domain(struct iommu_group *group,
 				    struct iommu_domain *new_domain);
+static int iommu_group_do_set_platform_dma(struct device *dev, void *data);
 static int iommu_create_device_direct_mappings(struct iommu_group *group,
 					       struct device *dev);
 static struct iommu_group *iommu_group_get_for_dev(struct device *dev);
@@ -2010,6 +2011,24 @@ static void __iommu_group_set_core_domain(struct iommu_group *group)
 	WARN(ret, "iommu driver failed to attach the default/blocking domain");
 }
 
+static int iommu_check_page_size(struct iommu_domain *domain,
+				struct device *dev)
+{
+	bool trusted = !(dev_is_pci(dev) && to_pci_dev(dev)->untrusted);
+
+	if (!iommu_is_paging_domain(domain))
+		return 0;
+	if (iommu_is_large_pages_domain(domain) && trusted)
+		return 0;
+
+	if (!(domain->pgsize_bitmap & (PAGE_SIZE | (PAGE_SIZE - 1)))) {
+		pr_warn("IOMMU pages cannot exactly represent CPU pages.\n");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 static int __iommu_attach_device(struct iommu_domain *domain,
 				 struct device *dev)
 {
@@ -2022,6 +2041,19 @@ static int __iommu_attach_device(struct iommu_domain *domain,
 	if (ret)
 		return ret;
 	dev->iommu->attach_deferred = 0;
+
+	/*
+	 * Check that CPU pages can be represented by the IOVA granularity.
+	 * This has to be done after ops->attach_dev since many IOMMU drivers
+	 * only limit domain->pgsize_bitmap after having attached the first
+	 * device.
+	 */
+	ret = iommu_check_page_size(domain, dev);
+	if (ret) {
+		iommu_group_do_set_platform_dma(dev, NULL);
+		return ret;
+	}
+
 	trace_attach_device_to_domain(dev);
 	return 0;
 }
