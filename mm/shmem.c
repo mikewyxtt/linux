@@ -93,6 +93,10 @@ static struct vfsmount *shm_mnt;
 /* Symlink up to this size is kmalloc'ed instead of using a swappable page */
 #define SHORT_SYMLINK_LEN 128
 
+static const unsigned long shmem_base_nr(struct address_space *mapping) {
+	return 1L << mapping->order;
+}
+
 /*
  * shmem_fallocate communicates with shmem_fault or shmem_writepage via
  * inode->i_private (with i_rwsem making sure that it has only one user at
@@ -704,6 +708,7 @@ static int shmem_add_to_page_cache(struct folio *folio,
 	VM_BUG_ON_FOLIO(!folio_test_locked(folio), folio);
 	VM_BUG_ON_FOLIO(!folio_test_swapbacked(folio), folio);
 	VM_BUG_ON(expected && folio_test_large(folio));
+	VM_BUG_ON_FOLIO(folio_order(folio) < mapping->order, folio);
 
 	folio_ref_add(folio, nr);
 	folio->mapping = mapping;
@@ -1342,7 +1347,7 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 	 * "force", drivers/gpu/drm/i915/gem/i915_gem_shmem.c gets huge pages,
 	 * and its shmem_writeback() needs them to be split when swapping.
 	 */
-	if (folio_test_large(folio)) {
+	if (folio->mapping->order == 0 && folio_test_large(folio)) {
 		/* Ensure the subpages are still dirty */
 		folio_test_set_dirty(folio);
 		if (split_huge_page(page) < 0)
@@ -1568,10 +1573,16 @@ static struct folio *shmem_alloc_folio(gfp_t gfp,
 			struct shmem_inode_info *info, pgoff_t index)
 {
 	struct vm_area_struct pvma;
+	struct address_space *mapping = info->vfs_inode.i_mapping;
+	pgoff_t hindex;
 	struct folio *folio;
 
+	hindex = round_down(index, shmem_base_nr(mapping));
+	WARN_ON(xa_find(&mapping->i_pages, &hindex, hindex + shmem_base_nr(mapping) - 1,
+			XA_PRESENT));
+
 	shmem_pseudo_vma_init(&pvma, info, index);
-	folio = vma_alloc_folio(gfp, 0, &pvma, 0, false);
+	folio = vma_alloc_folio(gfp, mapping->order, &pvma, 0, false);
 	shmem_pseudo_vma_destroy(&pvma);
 
 	return folio;
@@ -1581,13 +1592,14 @@ static struct folio *shmem_alloc_and_acct_folio(gfp_t gfp, struct inode *inode,
 		pgoff_t index, bool huge)
 {
 	struct shmem_inode_info *info = SHMEM_I(inode);
+	struct address_space *mapping = info->vfs_inode.i_mapping;
 	struct folio *folio;
 	int nr;
 	int err = -ENOSPC;
 
 	if (!IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE))
 		huge = false;
-	nr = huge ? HPAGE_PMD_NR : 1;
+	nr = huge ? HPAGE_PMD_NR : shmem_base_nr(mapping);
 
 	if (!shmem_inode_acct_block(inode, nr))
 		goto failed;
@@ -1633,6 +1645,7 @@ static int shmem_replace_folio(struct folio **foliop, gfp_t gfp,
 	swp_entry_t entry;
 	pgoff_t swap_index;
 	int error;
+	int nr = folio_nr_pages(*foliop);
 
 	old = *foliop;
 	entry = folio_swap_entry(old);
@@ -1644,12 +1657,13 @@ static int shmem_replace_folio(struct folio **foliop, gfp_t gfp,
 	 * limit chance of success by further cpuset and node constraints.
 	 */
 	gfp &= ~GFP_CONSTRAINT_MASK;
-	VM_BUG_ON_FOLIO(folio_test_large(old), old);
 	new = shmem_alloc_folio(gfp, info, index);
 	if (!new)
 		return -ENOMEM;
 
-	folio_get(new);
+	VM_BUG_ON_FOLIO(nr != folio_nr_pages(new), old);
+
+	folio_ref_add(new, nr);
 	folio_copy(new, old);
 	flush_dcache_folio(new);
 
@@ -1667,10 +1681,10 @@ static int shmem_replace_folio(struct folio **foliop, gfp_t gfp,
 	error = shmem_replace_entry(swap_mapping, swap_index, old, new);
 	if (!error) {
 		mem_cgroup_migrate(old, new);
-		__lruvec_stat_mod_folio(new, NR_FILE_PAGES, 1);
-		__lruvec_stat_mod_folio(new, NR_SHMEM, 1);
-		__lruvec_stat_mod_folio(old, NR_FILE_PAGES, -1);
-		__lruvec_stat_mod_folio(old, NR_SHMEM, -1);
+		__lruvec_stat_mod_folio(new, NR_FILE_PAGES, nr);
+		__lruvec_stat_mod_folio(new, NR_SHMEM, nr);
+		__lruvec_stat_mod_folio(old, NR_FILE_PAGES, -nr);
+		__lruvec_stat_mod_folio(old, NR_SHMEM, -nr);
 	}
 	xa_unlock_irq(&swap_mapping->i_pages);
 
@@ -1690,7 +1704,7 @@ static int shmem_replace_folio(struct folio **foliop, gfp_t gfp,
 	old->private = NULL;
 
 	folio_unlock(old);
-	folio_put_refs(old, 2);
+	folio_put_refs(old, 1 + nr);
 	return error;
 }
 
@@ -2447,13 +2461,14 @@ int shmem_mfill_atomic_pte(struct mm_struct *dst_mm,
 	}
 
 	if (!*pagep) {
+		pgoff_t aligned = round_down(pgoff, shmem_base_nr(mapping));
 		ret = -ENOMEM;
 		folio = shmem_alloc_folio(gfp, info, pgoff);
 		if (!folio)
 			goto out_unacct_blocks;
 
 		if (!zeropage) {	/* COPY */
-			page_kaddr = kmap_local_folio(folio, 0);
+			page_kaddr = kmap_local_folio(folio, pgoff - aligned);
 			/*
 			 * The read mmap_lock is held here.  Despite the
 			 * mmap_lock being read recursive a deadlock is still
