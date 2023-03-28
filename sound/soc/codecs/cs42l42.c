@@ -1144,7 +1144,6 @@ struct snd_soc_dai_driver cs42l42_dai = {
 			.formats = CS42L42_FORMATS,
 		},
 		.symmetric_rate = 1,
-		.symmetric_sample_bits = 1,
 		.ops = &cs42l42_ops,
 };
 EXPORT_SYMBOL_NS_GPL(cs42l42_dai, SND_SOC_CS42L42_CORE);
@@ -1672,7 +1671,7 @@ irqreturn_t cs42l42_irq_thread(int irq, void *data)
 		return IRQ_NONE;
 	}
 
-	/* Read sticky registers to clear interurpt */
+	/* Read sticky registers to clear interrupt */
 	for (i = 0; i < ARRAY_SIZE(stickies); i++) {
 		regmap_read(cs42l42->regmap, irq_params_table[i].status_addr,
 				&(stickies[i]));
