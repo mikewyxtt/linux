@@ -946,8 +946,7 @@ static void cs42l84_setup_plug_detect(struct cs42l84_private *cs42l84)
 
 }
 
-static int cs42l84_i2c_probe(struct i2c_client *i2c_client,
-			     const struct i2c_device_id *id)
+static int cs42l84_i2c_probe(struct i2c_client *i2c_client)
 {
 	struct cs42l84_private *cs42l84;
 	int ret, devid;
