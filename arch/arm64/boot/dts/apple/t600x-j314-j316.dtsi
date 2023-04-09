@@ -252,6 +252,7 @@
 	clock-frequency = <1068000000>;
 };
 
+#ifndef NO_NOR
 &spi1 {
 	flash@0 {
 		compatible = "jedec,spi-nor";
@@ -272,7 +273,9 @@
 		};
 	};
 };
+#endif
 
+#ifndef NO_SPI_TRACKPAD
 &spi3 {
 	status = "okay";
 
@@ -293,6 +296,7 @@
 		interrupts-extended = <&pinctrl_nub 6 IRQ_TYPE_LEVEL_LOW>;
 	};
 };
+#endif
 
 /* PCIe devices */
 &port00 {
