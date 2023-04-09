@@ -82,6 +82,7 @@ struct apple_atcphy {
 
 	/* calibration fuse values */
 	struct {
+		bool present;
 		u32 aus_cmn_shm_vreg_trim;
 		u32 auspll_rodco_encap;
 		u32 auspll_rodco_bias_adjust;

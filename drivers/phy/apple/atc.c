@@ -702,6 +702,9 @@ static void atcphy_setup_pll_fuses(struct apple_atcphy *atcphy)
 {
 	void __iomem *regs = atcphy->regs.core;
 
+	if (!atcphy->fuses.present)
+		return;
+
 	/* CIO3PLL fuses */
 	mask32(regs + CIO3PLL_DCO_NCTRL, CIO3PLL_DCO_COARSEBIN_EFUSE0,
 	       FIELD_PREP(CIO3PLL_DCO_COARSEBIN_EFUSE0,
@@ -2304,6 +2307,8 @@ static int atcphy_load_fuses(struct apple_atcphy *atcphy)
 		return ret;
 	}
 
+	atcphy->fuses.present = true;
+
 	trace_atcphy_fuses(atcphy);
 	return 0;
 }
@@ -2347,9 +2352,12 @@ static int atcphy_probe(struct platform_device *pdev)
 	if (IS_ERR(atcphy->regs.pipehandler))
 		return PTR_ERR(atcphy->regs.pipehandler);
 
-	ret = atcphy_load_fuses(atcphy);
-	if (ret)
-		return ret;
+	if (of_property_read_bool(dev->of_node, "nvmem-cells")) {
+		ret = atcphy_load_fuses(atcphy);
+		if (ret)
+			return ret;
+	}
+
 	ret = atcphy_load_tunables(atcphy);
 	if (ret)
 		return ret;
