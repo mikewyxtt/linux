@@ -766,8 +766,9 @@ static void dchid_request_gpio(struct dchid_iface *iface, int id, const char *na
 	snprintf(prop_name, sizeof(prop_name), "apple,%s", name);
 
 	iface->gpio = devm_fwnode_gpiod_get_index(iface->dchid->dev,
-						  of_fwnode_handle(iface->dchid->dev->of_node), prop_name, 0,
-						  GPIOD_OUT_LOW, name);
+						  (struct fwnode_handle *)of_fwnode_handle(
+							  iface->of_node),
+						  prop_name, 0, GPIOD_OUT_LOW, name);
 
 	if (IS_ERR_OR_NULL(iface->gpio)) {
 		dev_err(iface->dchid->dev, "Failed to request GPIO %s-gpios\n", prop_name);
@@ -1055,6 +1056,11 @@ static int dockchannel_hid_probe(struct platform_device *pdev)
 	struct device_node *child, *helper;
 	struct platform_device *helper_pdev;
 	struct property *prop;
+	int ret;
+
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	if (ret)
+		return ret;
 
 	dchid = devm_kzalloc(dev, sizeof(*dchid), GFP_KERNEL);
 	if (!dchid) {
