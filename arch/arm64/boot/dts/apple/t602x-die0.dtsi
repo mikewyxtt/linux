@@ -680,6 +680,7 @@
 					<0 0 0 2 &port01 0 0 0 1>,
 					<0 0 0 3 &port01 0 0 0 2>,
 					<0 0 0 4 &port01 0 0 0 3>;
+			status = "disabled";
 		};
 
 		port02: pci@2,0 {
@@ -739,6 +740,7 @@
 		interrupt-parent = <&aic>;
 		interrupts = <AIC_IRQ 0 1345 IRQ_TYPE_LEVEL_HIGH>;
 		power-domains = <&ps_apcie_gp_sys>;
+		status = "disabled";
 	};
 
 	pcie0_dart_2: iommu@596000000 {

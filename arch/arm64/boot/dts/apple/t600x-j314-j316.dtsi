@@ -323,12 +323,17 @@
 	/* SD card reader */
 	bus-range = <2 2>;
 	pwren-gpios = <&smc_gpio 26 GPIO_ACTIVE_HIGH>;
+	status = "okay";
 	sdhci0: mmc@0,0 {
 		compatible = "pci17a0,9755";
 		reg = <0x20000 0x0 0x0 0x0 0x0>;
 		cd-inverted;
 		wp-inverted;
 	};
+};
+
+&pcie0_dart_1 {
+	status = "okay";
 };
 
 /* USB controllers */
