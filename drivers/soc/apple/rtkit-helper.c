@@ -78,6 +78,11 @@ static int apple_rtkit_helper_probe(struct platform_device *pdev)
 	struct apple_rtkit_helper *helper;
 	int ret;
 
+	/* 44 bits for addresses in standard RTKit requests */
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(44));
+	if (ret)
+		return ret;
+
 	helper = devm_kzalloc(dev, sizeof(*helper), GFP_KERNEL);
 	if (!helper)
 		return -ENOMEM;
