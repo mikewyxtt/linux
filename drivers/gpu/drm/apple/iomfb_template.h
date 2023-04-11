@@ -161,7 +161,7 @@ struct DCP_FW_NAME(dcp_map_reg_req) {
 
 struct DCP_FW_NAME(dcp_map_reg_resp) {
 #if DCP_FW_VER >= DCP_FW_VERSION(13, 2, 0)
-	u64 unk_u64;
+	u64 dva;
 #endif
 	u64 addr;
 	u64 length;
