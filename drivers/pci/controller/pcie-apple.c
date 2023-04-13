@@ -563,7 +563,7 @@ static int apple_pcie_setup_refclk(struct apple_pcie *pcie,
 		return res;
 
 	if (pcie->hw->phy_lane_ctl)
-		rmw_clear(PHY_LANE_CTL_CFGACC, port->phy + PHY_LANE_CTL);
+		rmw_clear(PHY_LANE_CTL_CFGACC, port->phy + pcie->hw->phy_lane_ctl);
 
 	rmw_set(PHY_LANE_CFG_REFCLKEN, port->phy + PHY_LANE_CFG);
 
