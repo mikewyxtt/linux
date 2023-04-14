@@ -670,6 +670,12 @@ static struct dcp_rt_bandwidth dcpep_cb_rt_bandwidth(struct apple_dcp *dcp)
 	}
 }
 
+static struct dcp_d006_resp dcpep_cb_d006(struct apple_dcp *dcp,
+					  struct dcp_d006_req *req)
+{
+	return (struct dcp_d006_resp){};
+}
+
 /* Callback to get the current time as milliseconds since the UNIX epoch */
 static u64 dcpep_cb_get_time(struct apple_dcp *dcp)
 {
@@ -1031,6 +1037,8 @@ TRAMPOLINE_INOUT(trampoline_prop_end, dcpep_cb_prop_end,
 		 struct dcp_set_dcpav_prop_end_req, u8);
 TRAMPOLINE_OUT(trampoline_rt_bandwidth, dcpep_cb_rt_bandwidth,
 	       struct dcp_rt_bandwidth);
+TRAMPOLINE_INOUT(trampoline_d006, dcpep_cb_d006,
+	       struct dcp_d006_req, struct dcp_d006_resp);
 TRAMPOLINE_OUT(trampoline_get_frequency, dcpep_cb_get_frequency, u64);
 TRAMPOLINE_OUT(trampoline_get_time, dcpep_cb_get_time, u64);
 TRAMPOLINE_IN(trampoline_hotplug, dcpep_cb_hotplug, u64);

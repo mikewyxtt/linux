@@ -136,6 +136,14 @@ struct dcp_rt_bandwidth {
 	u32 padding[7];
 } __packed;
 
+struct dcp_d006_req {
+	u8 unk[32];
+} __packed;
+
+struct dcp_d006_resp {
+	u8 unk[28];
+} __packed;
+
 /* Method calls */
 
 enum dcpep_method {
