@@ -67,11 +67,14 @@ struct dchid_init_hdr {
 	u8 unk2;
 	u8 iface;
 	char name[16];
+	u8 more_packets;
+	u8 unkpad;
 } __packed;
 
 #define INIT_HID_DESCRIPTOR	0
 #define INIT_GPIO_REQUEST	1
 #define INIT_TERMINATOR		2
+#define INIT_PRODUCT_NAME	7
 
 #define CMD_RESET_INTERFACE 0x40
 #define CMD_SEND_FIRMWARE 0x95
@@ -80,7 +83,6 @@ struct dchid_init_hdr {
 
 struct dchid_init_block_hdr {
 	u16 type;
-	u16 subtype;
 	u16 length;
 } __packed;
 
@@ -689,13 +691,6 @@ static void dchid_handle_descriptor(struct dchid_iface *iface, void *hid_desc, s
 		return;
 
 	iface->hid_desc_len = desc_len;
-
-	/* We need to enable STM first, since it'll give us the device IDs */
-	if (iface->dchid->id_ready || !strcmp(iface->name, "stm")) {
-		dchid_create_interface(iface);
-	} else {
-		iface->deferred = true;
-	}
 }
 
 static void dchid_handle_ready(struct dockchannel_hid *dchid, void *data, size_t length)
@@ -795,13 +790,14 @@ static void dchid_handle_init(struct dockchannel_hid *dchid, void *data, size_t 
 	data += sizeof(*hdr);
 	length -= sizeof(*hdr);
 
-	while (length > sizeof(*blk)) {
+	while (length >= sizeof(*blk)) {
 		blk = data;
 		data += sizeof(*blk);
 		length -= sizeof(*blk);
 
 		if (blk->length > length)
-			return;
+			break;
+
 		switch (blk->type) {
 		case INIT_HID_DESCRIPTOR:
 			dchid_handle_descriptor(iface, data, blk->length);
@@ -811,17 +807,48 @@ static void dchid_handle_init(struct dockchannel_hid *dchid, void *data, size_t 
 			struct dchid_gpio_request *req = data;
 
 			if (sizeof(*req) > length)
-				return;
+				break;
 			dchid_request_gpio(iface, req->id, req->name);
 			break;
 		}
 
 		case INIT_TERMINATOR:
-			return;
+			break;
+
+		case INIT_PRODUCT_NAME: {
+			char *product = data;
+
+			if (product[blk->length - 1] != 0) {
+				dev_warn(dchid->dev, "Unterminated product name for %s\n",
+					 iface->name);
+			} else {
+				dev_info(dchid->dev, "Product name for %s: %s\n",
+					 iface->name, product);
+			}
+			break;
 		}
 
-		data += blk->length + sizeof(*blk);
-		length -= blk->length + sizeof(*blk);
+		default:
+			dev_warn(dchid->dev, "Unknown init packet %d for %s\n",
+				 blk->type, iface->name);
+			break;
+		}
+
+		data += blk->length;
+		length -= blk->length;
+
+		if (blk->type == INIT_TERMINATOR)
+			break;
+	}
+
+	if (hdr->more_packets)
+		return;
+
+	/* We need to enable STM first, since it'll give us the device IDs */
+	if (iface->dchid->id_ready || !strcmp(iface->name, "stm")) {
+		dchid_create_interface(iface);
+	} else {
+		iface->deferred = true;
 	}
 }
 
