@@ -252,8 +252,9 @@
 	clock-frequency = <1068000000>;
 };
 
-#ifndef NO_NOR
 &spi1 {
+	status = "okay";
+
 	flash@0 {
 		compatible = "jedec,spi-nor";
 		reg = <0x0>;
@@ -266,14 +267,13 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			partition@700000 {
+			nvram: partition@700000 {
 				label = "nvram";
 				reg = <0x700000 0x20000>;
 			};
 		};
 	};
 };
-#endif
 
 #ifndef NO_SPI_TRACKPAD
 &spi3 {

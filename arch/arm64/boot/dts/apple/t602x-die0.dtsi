@@ -458,8 +458,6 @@
 		status = "disabled";
 	};
 
-#if 0
-	/* TODO: pins */
 	spi1: spi@39b104000 {
 		compatible = "apple,t6020-spi", "apple,spi";
 		reg = <0x3 0x9b104000 0x0 0x4000>;
@@ -471,25 +469,36 @@
 		pinctrl-0 = <&spi1_pins>;
 		pinctrl-names = "default";
 		power-domains = <&ps_spi1>;
+		status = "disabled";
 	};
-#endif
 
-#if 0
-	/* Unused, no SPI trackpad */
-	spi3: spi@39b10c000 {
+	spi2: spi@39b108000 {
 		compatible = "apple,t6020-spi", "apple,spi";
-		reg = <0x3 0x9b10c000 0x0 0x4000>;
+		reg = <0x3 0x9b108000 0x0 0x4000>;
 		interrupt-parent = <&aic>;
-		interrupts = <AIC_IRQ 0 1208 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <AIC_IRQ 0 1207 IRQ_TYPE_LEVEL_HIGH>;
 		#address-cells = <1>;
 		#size-cells = <0>;
 		clocks = <&clkref>;
-		pinctrl-0 = <&spi3_pins>;
+		pinctrl-0 = <&spi2_pins>;
 		pinctrl-names = "default";
-		power-domains = <&ps_spi3>;
+		power-domains = <&ps_spi2>;
 		status = "disabled";
 	};
-#endif
+
+	spi4: spi@39b110000 {
+		compatible = "apple,t6020-spi", "apple,spi";
+		reg = <0x3 0x9b110000 0x0 0x4000>;
+		interrupt-parent = <&aic>;
+		interrupts = <AIC_IRQ 0 1209 IRQ_TYPE_LEVEL_HIGH>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		clocks = <&clkref>;
+		pinctrl-0 = <&spi4_pins>;
+		pinctrl-names = "default";
+		power-domains = <&ps_spi4>;
+		status = "disabled";
+	};
 
 	serial0: serial@39b200000 {
 		compatible = "apple,s5l-uart";

@@ -51,14 +51,26 @@
 			<APPLE_PINMUX(80, 1)>;
 	};
 
-/* TODO
 	spi1_pins: spi1-pins {
-		pinmux = <APPLE_PINMUX(10, 1)>,
-			<APPLE_PINMUX(11, 1)>,
-			<APPLE_PINMUX(157, 1)>,
-			<APPLE_PINMUX(158, 1)>;
+		pinmux = <APPLE_PINMUX(155, 1)>, /* SDI */
+			<APPLE_PINMUX(156, 1)>,  /* SDO */
+			<APPLE_PINMUX(157, 1)>,  /* SCK */
+			<APPLE_PINMUX(158, 1)>;  /* CS */
 	};
-*/
+
+	spi2_pins: spi2-pins {
+		pinmux = <APPLE_PINMUX(159, 1)>, /* SDI */
+			<APPLE_PINMUX(160, 1)>,  /* SDO */
+			<APPLE_PINMUX(161, 1)>,  /* SCK */
+			<APPLE_PINMUX(162, 1)>;  /* CS */
+	};
+
+	spi4_pins: spi4-pins {
+		pinmux = <APPLE_PINMUX(167, 1)>, /* SDI */
+			<APPLE_PINMUX(168, 1)>,  /* SDO */
+			<APPLE_PINMUX(169, 1)>,  /* SCK */
+			<APPLE_PINMUX(170, 1)>;  /* CS */
+	};
 
 	pcie_pins: pcie-pins {
 		pinmux = <APPLE_PINMUX(0, 1)>,

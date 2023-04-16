@@ -23,6 +23,10 @@
 / {
 	compatible = "apple,j474s", "apple,t6020", "apple,arm-platform";
 	model = "Apple Mac Mini (M2 Pro, 2023)";
+
+	aliases {
+		ethernet0 = &ethernet0;
+	};
 };
 
 &hpm0 {
