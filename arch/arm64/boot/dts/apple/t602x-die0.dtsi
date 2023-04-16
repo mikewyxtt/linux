@@ -173,7 +173,7 @@
 	mtp: mtp@2a9400000 {
 		compatible = "apple,t6020-mtp", "apple,t6020-rtk-helper-asc4", "apple,mtp", "apple,rtk-helper-asc4";
 		reg = <0x2 0xa9400000 0x0 0x4000>,
-			<0x2 0xa9c9c000 0x0 0x8000>;
+			<0x2 0xa9c00000 0x0 0x100000>;
 		reg-names = "asc", "sram";
 		mboxes = <&mtp_mbox>;
 		iommus = <&mtp_dart 1>;
