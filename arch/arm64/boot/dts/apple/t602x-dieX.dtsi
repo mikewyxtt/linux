@@ -31,6 +31,15 @@
 		reg = <0x2 0x8e080000 0 0x8000>;
 	};
 
+	DIE_NODE(pmgr_misc): power-management@28e20c000 {
+		compatible = "apple,t6020-pmgr-misc", "apple,t6000-pmgr-misc";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		reg = <0x2 0x8e20c000 0 0x400>,
+			<0x2 0x8e20c400 0 0x400>;
+		reg-names = "fabric-ps", "dcs-ps";
+	};
+
 	DIE_NODE(pmgr_south): power-management@28e680000 {
 		compatible = "apple,t6020-pmgr", "apple,pmgr", "syscon", "simple-mfd";
 		#address-cells = <1>;
