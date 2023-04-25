@@ -1194,6 +1194,7 @@
 		#reset-cells = <0>;
 		label = DIE_LABEL(aes);
 		power-domains = <&DIE_NODE(ps_sio)>;
+		apple,always-on; /* Maybe critical? */
 	};
 
 	DIE_NODE(ps_amcc1): power-controller@2d8 {
@@ -1919,14 +1920,6 @@
 		#reset-cells = <0>;
 		label = DIE_LABEL(atc3_usb_aon);
 		apple,always-on; /* Needs to stay on for dwc3 to work */
-	};
-
-	DIE_NODE(ps_gp_usb_aon): power-controller@a8 {
-		compatible = "apple,t6000-pmgr-pwrstate", "apple,pmgr-pwrstate";
-		reg = <0xa8 4>;
-		#power-domain-cells = <0>;
-		#reset-cells = <0>;
-		label = DIE_LABEL(gp_usb_aon);
 	};
 
 	DIE_NODE(ps_nub_fabric): power-controller@b0 {
