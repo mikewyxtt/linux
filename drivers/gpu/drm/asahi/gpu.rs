@@ -19,7 +19,7 @@ use kernel::{
     delay::coarse_sleep,
     error::code::*,
     macros::versions,
-    new_mutex,
+    new_mutex, new_mutex_pinned,
     prelude::*,
     soc::apple::rtkit,
     sync::{
@@ -605,22 +605,15 @@ impl GpuManager::ver {
 
         let fwctl_channel = channel::FwCtlChannel::new(dev, &mut alloc)?;
 
+        let xdev = dev;
+        let alloc_cell = core::cell::RefCell::new(Some(alloc));
+        let alloc_ref = &alloc_cell;
+        let alloc_ref2 = &alloc_cell;
+        let alloc_ref3 = &alloc_cell;
         let event_manager_clone = event_manager.clone();
-        let alloc_ref = &mut alloc;
-        let rx_channels = Box::init(try_init!(RxChannels::ver {
-            event: channel::EventChannel::new(dev, alloc_ref, event_manager_clone)?,
-            fw_log: channel::FwLogChannel::new(dev, alloc_ref)?,
-            ktrace: channel::KTraceChannel::new(dev, alloc_ref)?,
-            stats: channel::StatsChannel::ver::new(dev, alloc_ref)?,
-        }))?;
-
-        let alloc_ref = &mut alloc;
-        let tx_channels = Box::init(try_init!(TxChannels::ver {
-            device_control: channel::DeviceControlChannel::ver::new(dev, alloc_ref)?,
-        }))?;
 
         let x = UniqueArc::pin_init(try_pin_init!(GpuManager::ver {
-            dev: dev.clone(),
+            dev: xdev.clone(),
             cfg,
             dyncfg: *dyncfg,
             initdata: *initdata,
@@ -629,10 +622,20 @@ impl GpuManager::ver {
             rtkit <- new_mutex!(None, "rtkit"),
             crashed: AtomicBool::new(false),
             event_manager,
-            alloc <- new_mutex!(alloc, "alloc"),
             fwctl_channel <- new_mutex!(fwctl_channel, "fwctl_channel"),
-            rx_channels <- new_mutex!(*rx_channels, "rx_channels"),
-            tx_channels <- new_mutex!(*tx_channels, "tx_channels"),
+            rx_channels <- new_mutex_pinned!(try_pin_init!(RxChannels::ver {
+                event:
+                    channel::EventChannel::new(xdev, alloc_ref2.borrow_mut().as_mut().unwrap(),
+                                               event_manager_clone)?,
+                fw_log: channel::FwLogChannel::new(xdev, alloc_ref2.borrow_mut().as_mut().unwrap())?,
+                ktrace: channel::KTraceChannel::new(xdev, alloc_ref2.borrow_mut().as_mut().unwrap())?,
+                stats: channel::StatsChannel::ver::new(xdev, alloc_ref2.borrow_mut().as_mut().unwrap())?,
+            }), "rx_channels"),
+            tx_channels <- new_mutex_pinned!(try_pin_init!(TxChannels::ver {
+                device_control:
+                    channel::DeviceControlChannel::ver::new(xdev, alloc_ref2.borrow_mut().as_mut().unwrap())?,
+            }), "tx_channels"),
+            alloc <- new_mutex!(alloc_ref3.take().unwrap(), "alloc"),
             pipes,
             buffer_mgr: buffer::BufferManager::new()?,
             ids: Default::default(),
