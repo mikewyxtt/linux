@@ -10,21 +10,25 @@ use crate::ioctl;
 const BASE: u32 = bindings::DRM_IOCTL_BASE as u32;
 
 /// Construct a DRM ioctl number with no argument.
+#[inline(always)]
 pub const fn IO(nr: u32) -> u32 {
     ioctl::_IO(BASE, nr)
 }
 
 /// Construct a DRM ioctl number with a read-only argument.
+#[inline(always)]
 pub const fn IOR<T>(nr: u32) -> u32 {
     ioctl::_IOR::<T>(BASE, nr)
 }
 
 /// Construct a DRM ioctl number with a write-only argument.
+#[inline(always)]
 pub const fn IOW<T>(nr: u32) -> u32 {
     ioctl::_IOW::<T>(BASE, nr)
 }
 
 /// Construct a DRM ioctl number with a read-write argument.
+#[inline(always)]
 pub const fn IOWR<T>(nr: u32) -> u32 {
     ioctl::_IOWR::<T>(BASE, nr)
 }
@@ -140,8 +144,8 @@ macro_rules! declare_drm_ioctls {
                             let file = unsafe { $crate::drm::file::File::from_raw(raw_file_priv) };
 
                             match $func(&*dev, data, &file) {
-                                Err(e) => e.to_kernel_errno(),
-                                Ok(i) => i.try_into().unwrap_or(ERANGE.to_kernel_errno()),
+                                Err(e) => e.to_errno(),
+                                Ok(i) => i.try_into().unwrap_or(ERANGE.to_errno()),
                             }
                         }
                         Some($cmd)
