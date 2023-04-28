@@ -23,6 +23,7 @@
 #![feature(new_uninit)]
 #![feature(pin_macro)]
 #![feature(receiver_trait)]
+#![feature(return_position_impl_trait_in_trait)]
 #![feature(unsize)]
 
 // Ensure conditional compilation based on the kernel configuration works;
