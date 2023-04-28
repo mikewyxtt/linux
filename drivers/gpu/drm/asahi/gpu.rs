@@ -19,7 +19,7 @@ use kernel::{
     delay::coarse_sleep,
     error::code::*,
     macros::versions,
-    new_mutex,
+    new_mutex, new_mutex_pinned,
     prelude::*,
     soc::apple::rtkit,
     sync::{
@@ -605,22 +605,7 @@ impl GpuManager::ver {
 
         let fwctl_channel = channel::FwCtlChannel::new(dev, &mut alloc)?;
 
-        let event_manager_clone = event_manager.clone();
-        let alloc_ref = &mut alloc;
-        let rx_channels = Box::init(try_init!(RxChannels::ver {
-            event: channel::EventChannel::new(dev, alloc_ref, event_manager_clone)?,
-            fw_log: channel::FwLogChannel::new(dev, alloc_ref)?,
-            ktrace: channel::KTraceChannel::new(dev, alloc_ref)?,
-            stats: channel::StatsChannel::ver::new(dev, alloc_ref)?,
-        }))?;
-
-        let alloc_ref = &mut alloc;
-        let tx_channels = Box::init(try_init!(TxChannels::ver {
-            device_control: channel::DeviceControlChannel::ver::new(dev, alloc_ref)?,
-        }))?;
-
         let x = UniqueArc::pin_init(try_pin_init!(GpuManager::ver {
-            dev: dev.clone(),
             cfg,
             dyncfg: *dyncfg,
             initdata: *initdata,
@@ -628,16 +613,24 @@ impl GpuManager::ver {
             io_mappings: Vec::new(),
             rtkit <- new_mutex!(None, "rtkit"),
             crashed: AtomicBool::new(false),
-            event_manager,
-            alloc <- new_mutex!(alloc, "alloc"),
             fwctl_channel <- new_mutex!(fwctl_channel, "fwctl_channel"),
-            rx_channels <- new_mutex!(*rx_channels, "rx_channels"),
-            tx_channels <- new_mutex!(*tx_channels, "tx_channels"),
+            rx_channels <- new_mutex_pinned!(try_init!(RxChannels::ver {
+                event: channel::EventChannel::new(dev, &mut alloc, event_manager.clone())?,
+                fw_log: channel::FwLogChannel::new(dev, &mut alloc)?,
+                ktrace: channel::KTraceChannel::new(dev, &mut alloc)?,
+                stats: channel::StatsChannel::ver::new(dev, &mut alloc)?,
+            }), "rx_channels"),
+            tx_channels <- new_mutex_pinned!(try_init!(TxChannels::ver {
+                device_control: channel::DeviceControlChannel::ver::new(dev, &mut alloc)?,
+            }), "tx_channels"),
+            alloc <- new_mutex!(alloc, "alloc"),
+            event_manager,
             pipes,
             buffer_mgr: buffer::BufferManager::new()?,
             ids: Default::default(),
             garbage_work <- new_mutex!(Vec::new(), "garbage_work"),
             garbage_contexts <- new_mutex!(Vec::new(), "garbage_contexts"),
+            dev: dev.clone(),
         }))?;
 
         Ok(x)

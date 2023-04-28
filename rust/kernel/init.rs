@@ -622,13 +622,16 @@ macro_rules! try_pin_init {
             use $crate::init::__internal::HasPinData;
             $t$(::<$($generics),*>)?::__pin_data()
         };
+        let data = $crate::init::__internal::MoveMe(data);
         // Ensure that `data` really is of type `PinData` and help with type inference:
         let init = $crate::init::__internal::PinData::make_closure::<_, __InitOk, $err>(
-            data,
-            move |slot| {
+            data.0,
+            |slot| {
                 {
                     // Shadow the structure so it cannot be used to return early.
                     struct __InitOk;
+                    let data = data;
+                    let $crate::init::__internal::MoveMe(data) = data;
                     // Create the `this` so it can be referenced by the user inside of the
                     // expressions creating the individual fields.
                     $(let $this = unsafe { ::core::ptr::NonNull::new_unchecked(slot) };)?
@@ -893,7 +896,7 @@ macro_rules! try_init {
         // Ensure that `data` really is of type `InitData` and help with type inference:
         let init = $crate::init::__internal::InitData::make_closure::<_, __InitOk, $err>(
             data,
-            move |slot| {
+            |slot| {
                 {
                     // Shadow the structure so it cannot be used to return early.
                     struct __InitOk;

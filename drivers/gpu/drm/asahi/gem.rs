@@ -265,12 +265,14 @@ impl gem::BaseDriverObject<Object> for DriverObject {
     fn new(_dev: &AsahiDevice, _size: usize) -> impl PinInit<Self, Error> {
         let id = GEM_ID.fetch_add(1, Ordering::Relaxed);
         mod_pr_debug!("DriverObject::new id={}\n", id);
+        struct ID(u64);
+        let id = ID(id);
         try_pin_init!(DriverObject {
             kernel: false,
             flags: 0,
             vm_id: None,
             mappings <- new_mutex!(Vec::new()),
-            id,
+            id: {let id = id; id.0},
         })
     }
 

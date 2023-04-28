@@ -233,3 +233,5 @@ impl OnlyCallFromDrop {
         Self(())
     }
 }
+
+pub struct MoveMe<T>(pub T);
