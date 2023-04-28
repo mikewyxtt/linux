@@ -101,12 +101,13 @@ pub mod internal {
 macro_rules! declare_drm_ioctls {
     ( $(($cmd:ident, $struct:ident, $flags:expr, $func:expr)),* $(,)? ) => {
         const IOCTLS: &'static [$crate::drm::ioctl::DrmIoctlDescriptor] = {
+            use $crate::uapi::*;
             const _:() = {
                 let i: u32 = $crate::uapi::DRM_COMMAND_BASE;
                 // Assert that all the IOCTLs are in the right order and there are no gaps,
                 // and that the sizeof of the specified type is correct.
                 $(
-                    let cmd: u32 = $crate::macros::concat_idents!($crate::uapi::DRM_IOCTL_, $cmd);
+                    let cmd: u32 = $crate::macros::concat_idents!(DRM_IOCTL_, $cmd);
                     ::core::assert!(i == $crate::ioctl::_IOC_NR(cmd));
                     ::core::assert!(core::mem::size_of::<$crate::uapi::$struct>() == $crate::ioctl::_IOC_SIZE(cmd));
                     let i: u32 = i + 1;
@@ -115,7 +116,7 @@ macro_rules! declare_drm_ioctls {
 
             let ioctls = &[$(
                 $crate::drm::ioctl::internal::drm_ioctl_desc {
-                    cmd: $crate::macros::concat_idents!($crate::uapi::DRM_IOCTL_, $cmd) as u32,
+                    cmd: $crate::macros::concat_idents!(DRM_IOCTL_, $cmd) as u32,
                     func: {
                         #[allow(non_snake_case)]
                         unsafe extern "C" fn $cmd(
