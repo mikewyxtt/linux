@@ -13,6 +13,7 @@
 #include <linux/jiffies.h>
 #include <linux/mdio.h>
 #include <linux/phy.h>
+#include <linux/lockdep.h>
 #include <linux/refcount.h>
 #include <linux/siphash.h>
 #include <linux/sched.h>
