@@ -13,6 +13,7 @@
 #include "build_bug.c"
 #include "err.c"
 #include "kunit.c"
+#include "lockdep.c"
 #include "mutex.c"
 #include "page.c"
 #include "refcount.c"
