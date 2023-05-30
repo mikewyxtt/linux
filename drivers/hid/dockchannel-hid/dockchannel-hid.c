@@ -760,10 +760,7 @@ static void dchid_request_gpio(struct dchid_iface *iface, int id, const char *na
 
 	snprintf(prop_name, sizeof(prop_name), "apple,%s", name);
 
-	iface->gpio = devm_fwnode_gpiod_get_index(iface->dchid->dev,
-						  (struct fwnode_handle *)of_fwnode_handle(
-							  iface->of_node),
-						  prop_name, 0, GPIOD_OUT_LOW, name);
+	iface->gpio = devm_gpiod_get_index(iface->dchid->dev, prop_name, 0, GPIOD_OUT_LOW);
 
 	if (IS_ERR_OR_NULL(iface->gpio)) {
 		dev_err(iface->dchid->dev, "Failed to request GPIO %s-gpios\n", prop_name);
