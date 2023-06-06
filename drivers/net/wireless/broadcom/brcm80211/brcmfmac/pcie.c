@@ -1028,6 +1028,7 @@ static irqreturn_t brcmf_pcie_quick_check_isr(int irq, void *arg)
 static irqreturn_t brcmf_pcie_isr_thread(int irq, void *arg)
 {
 	struct brcmf_pciedev_info *devinfo = (struct brcmf_pciedev_info *)arg;
+	struct brcmf_bus *bus_if = dev_get_drvdata(&devinfo->pdev->dev);
 	u32 status;
 
 	devinfo->in_irq = true;
@@ -1040,7 +1041,8 @@ static irqreturn_t brcmf_pcie_isr_thread(int irq, void *arg)
 			brcmf_pcie_poll_mb_data(devinfo);
 	}
 	if (devinfo->have_msi || status & devinfo->reginfo->int_d2h_db) {
-		if (devinfo->state == BRCMFMAC_PCIE_STATE_UP)
+		if (devinfo->state == BRCMFMAC_PCIE_STATE_UP &&
+			bus_if->state == BRCMF_BUS_UP)
 			brcmf_proto_msgbuf_rx_trigger(&devinfo->pdev->dev);
 	}
 
