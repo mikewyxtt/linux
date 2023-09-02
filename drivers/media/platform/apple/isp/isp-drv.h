@@ -250,7 +250,7 @@ enum {
 	dev_info((isp)->dev, "[%s] " fmt, __func__, ##__VA_ARGS__)
 #else
 #define isp_dbg(isp, fmt, ...) \
-	dev_dbg((isp)->dev, "[%s] " fmt, __func__, ##__VA_ARGS__)
+	dev_info((isp)->dev, "[%s] " fmt, __func__, ##__VA_ARGS__)
 #endif
 
 #define isp_err(isp, fmt, ...) \
