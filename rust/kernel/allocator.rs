@@ -31,16 +31,19 @@ static ALLOCATOR: KernelAllocator = KernelAllocator;
 // let's generate them ourselves instead.
 //
 // Note that `#[no_mangle]` implies exported too, nowadays.
+#[cfg(not(version("1.71")))]
 #[no_mangle]
 fn __rust_alloc(size: usize, _align: usize) -> *mut u8 {
     unsafe { bindings::krealloc(core::ptr::null(), size, bindings::GFP_KERNEL) as *mut u8 }
 }
 
+#[cfg(not(version("1.71")))]
 #[no_mangle]
 fn __rust_dealloc(ptr: *mut u8, _size: usize, _align: usize) {
     unsafe { bindings::kfree(ptr as *const core::ffi::c_void) };
 }
 
+#[cfg(not(version("1.71")))]
 #[no_mangle]
 fn __rust_realloc(ptr: *mut u8, _old_size: usize, _align: usize, new_size: usize) -> *mut u8 {
     unsafe {
@@ -52,6 +55,7 @@ fn __rust_realloc(ptr: *mut u8, _old_size: usize, _align: usize, new_size: usize
     }
 }
 
+#[cfg(not(version("1.71")))]
 #[no_mangle]
 fn __rust_alloc_zeroed(size: usize, _align: usize) -> *mut u8 {
     unsafe {
