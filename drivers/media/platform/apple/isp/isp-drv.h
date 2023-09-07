@@ -17,7 +17,6 @@
 /* #define APPLE_ISP_DEBUG */
 #define APPLE_ISP_DEVICE_NAME "apple-isp"
 
-#define ISP_MAX_RESV_REGIONS  4
 #define ISP_MAX_CHANNELS      6
 #define ISP_IPC_MESSAGE_SIZE  64
 #define ISP_IPC_FLAG_ACK      0x1
@@ -198,8 +197,6 @@ struct apple_isp {
 	struct mutex iovad_lock;
 
 	struct isp_firmware {
-		int count;
-		struct isp_resv resv[ISP_MAX_RESV_REGIONS];
 		struct isp_surf *heap;
 	} fw;
 
