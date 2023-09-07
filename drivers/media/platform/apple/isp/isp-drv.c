@@ -76,56 +76,6 @@ static int apple_isp_attach_genpd(struct apple_isp *isp)
 	return 0;
 }
 
-// TODO there has got to be a better way
-static int apple_isp_resv_region(struct apple_isp *isp, int index)
-{
-	struct device *dev = isp->dev;
-	int err;
-	struct resource r;
-	const __be32 *prop;
-	struct isp_resv *resv = &isp->fw.resv[index];
-	struct device_node *node =
-		of_parse_phandle(dev->of_node, "memory-region", index);
-	if (!node)
-		return -EINVAL;
-
-	if (of_address_to_resource(node, 0, &r)) {
-		dev_err(dev, "failed to resolve memory-region address\n");
-		of_node_put(node);
-		return -EINVAL;
-	}
-
-	prop = of_get_property(node, "iommu-addresses", NULL);
-	if (!prop) {
-		dev_err(dev, "failed to read iommu-addresses\n");
-		of_node_put(node);
-		return -EINVAL;
-	}
-	prop++;
-
-	resv->phys = r.start;
-	resv->size = resource_size(&r);
-	resv->iova = be64_to_cpup((const __be64 *)prop);
-	of_node_put(node);
-
-	isp_dbg(isp, "reserving: %d: phys: 0x%llx size: 0x%llx iova: 0x%llx\n",
-		index, resv->phys, resv->size, resv->iova);
-
-	err = iommu_map(isp->domain, resv->iova, resv->phys, resv->size,
-			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
-	if (err < 0)
-		dev_err(dev, "failed to map reserved region\n");
-
-	return err;
-}
-
-static void apple_isp_unresv_region(struct apple_isp *isp, int index)
-{
-	struct isp_resv *resv = &isp->fw.resv[index];
-	iommu_unmap(isp->domain, resv->iova, resv->size);
-	apple_isp_iommu_invalidate_tlb(isp);
-}
-
 static int apple_isp_init_iommu(struct apple_isp *isp)
 {
 	struct device *dev = isp->dev;
@@ -139,38 +89,25 @@ static int apple_isp_init_iommu(struct apple_isp *isp)
 		return -EPROBE_DEFER;
 	isp->shift = __ffs(isp->domain->pgsize_bitmap);
 
-	fw->count =
-		of_count_phandle_with_args(dev->of_node, "memory-region", NULL);
-	if ((fw->count <= 0) || (fw->count >= ISP_MAX_RESV_REGIONS)) {
-		dev_err(dev, "invalid reserved region count (%d)\n", fw->count);
-		return -EINVAL;
-	}
-
-	for (i = 0; i < fw->count; i++) {
-		err = apple_isp_resv_region(isp, i);
-		if (err < 0)
-			goto out;
-	}
-
 	err = of_property_read_u64(dev->of_node, "apple,isp-heap-base",
 				   &heap_base);
 	if (err) {
 		dev_err(dev, "failed to read 'apple,isp-heap-base': %d\n", err);
-		goto out;
+		return err;
 	}
 
 	err = of_property_read_u64(dev->of_node, "apple,isp-heap-size",
 				   &heap_size);
 	if (err) {
 		dev_err(dev, "failed to read 'apple,isp-heap-size': %d\n", err);
-		goto out;
+		return err;
 	}
 
 	err = of_property_read_u64(dev->of_node, "apple,dart-vm-size",
 				   &vm_size);
 	if (err) {
 		dev_err(dev, "failed to read 'apple,dart-vm-size': %d\n", err);
-		goto out;
+		return err;
 	}
 
 	drm_mm_init(&isp->iovad, heap_base, vm_size - heap_base);
@@ -180,25 +117,18 @@ static int apple_isp_init_iommu(struct apple_isp *isp)
 	if (!fw->heap) {
 		drm_mm_takedown(&isp->iovad);
 		err = -ENOMEM;
-		goto out;
+		return err;
 	}
 
 	apple_isp_iommu_sync_ttbr(isp);
 
 	return 0;
-
-out:
-	while (i--)
-		apple_isp_unresv_region(isp, i);
-	return err;
 }
 
 static void apple_isp_free_iommu(struct apple_isp *isp)
 {
 	isp_free_surface(isp, isp->fw.heap);
 	drm_mm_takedown(&isp->iovad);
-	for (int i = isp->fw.count; i-- > 0; )
-		apple_isp_unresv_region(isp, i);
 }
 
 static int apple_isp_probe(struct platform_device *pdev)
