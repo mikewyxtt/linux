@@ -569,13 +569,13 @@
 			power-domains = <&ps_dispdfr_fe>;
 			status = "disabled";
 		};
-
+/*
 		isp_dart: iommu@22c4a8000 {
 			compatible = "apple,t8103-dart";
 			reg = <0x2 0x2c4a8000 0x0 0x4000>;
 			#iommu-cells = <1>;
 			interrupt-parent = <&aic>;
-			interrupts = <AIC_IRQ 274z IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <AIC_IRQ 274 IRQ_TYPE_LEVEL_HIGH>;
 			power-domains = <&ps_isp_sys>;
 		};
 
@@ -602,7 +602,7 @@
 			memory-region = <&isp_heap>;
 			memory-region-names = "heap";
 		};
-
+*/
 		disp0_dart: iommu@231304000 {
 			compatible = "apple,t8112-dart", "apple,t8110-dart";
 			reg = <0x2 0x31304000 0x0 0x4000>;
