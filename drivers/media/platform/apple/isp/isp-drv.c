@@ -254,6 +254,7 @@ static int apple_isp_remove(struct platform_device *pdev)
 }
 
 static const struct apple_isp_hw apple_isp_hw_t8103 = {
+	.gen = ISP_GEN_T8103,
 	.platform_id = 0x1,
 	.pmu_base = 0x23b704000,
 
@@ -274,9 +275,12 @@ static const struct apple_isp_hw apple_isp_hw_t8103 = {
 	.bandwidth_base = 0x23bc3c000,
 	.bandwidth_bit = 0x0,
 	.bandwidth_size = 0x4,
+
+	.meta_size = ISP_META_SIZE_T8103,
 };
 
 static const struct apple_isp_hw apple_isp_hw_t6000 = {
+	.gen = ISP_GEN_T8103,
 	.platform_id = 0x3,
 	.pmu_base = 0x28e584000,
 
@@ -297,9 +301,12 @@ static const struct apple_isp_hw apple_isp_hw_t6000 = {
 	.bandwidth_base = 0x0,
 	.bandwidth_bit = 0x0,
 	.bandwidth_size = 0x8,
+
+	.meta_size = ISP_META_SIZE_T8103,
 };
 
 static const struct apple_isp_hw apple_isp_hw_t8110 = {
+	.gen = ISP_GEN_T8112,
 	.platform_id = 0xe, // J413AP
 	.pmu_base = 0x23b704000,
 
@@ -320,9 +327,12 @@ static const struct apple_isp_hw apple_isp_hw_t8110 = {
 	.bandwidth_base = 0x0,
 	.bandwidth_bit = 0x0,
 	.bandwidth_size = 0x8,
+
+	.meta_size = ISP_META_SIZE_T8112,
 };
 
 static const struct apple_isp_hw apple_isp_hw_t6020 = {
+	.gen = ISP_GEN_T8112,
 	.platform_id = 0x7, // J416cAP
 	.pmu_base = 0x290284000,
 
@@ -335,14 +345,16 @@ static const struct apple_isp_hw apple_isp_hw_t6020 = {
 	.dsid_clr_range2 = 0x1000,
 	.dsid_clr_range3 = 0x1000,
 
-	.clock_scratch = 0x28e3d0868, // CHECK
+	.clock_scratch = 0x28e3d10a8,
 	.clock_base = 0x0,
 	.clock_bit = 0x0,
 	.clock_size = 0x8,
-	.bandwidth_scratch = 0x28e3d0980, // CHECK
+	.bandwidth_scratch = 0x28e3d1200,
 	.bandwidth_base = 0x0,
 	.bandwidth_bit = 0x0,
 	.bandwidth_size = 0x8,
+
+	.meta_size = ISP_META_SIZE_T8112,
 };
 
 static const struct of_device_id apple_isp_of_match[] = {

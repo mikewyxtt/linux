@@ -487,14 +487,21 @@ static int isp_ch_configure_capture(struct apple_isp *isp, u32 ch)
 	if (err)
 		return err;
 
-	err = isp_cmd_ch_buffer_pool_config_set(isp, ch, CISP_POOL_TYPE_META);
+	err = isp_cmd_ch_buffer_pool_config_set(isp, ch, CISP_POOL_TYPE_META, 1);
 	if (err)
 		return err;
 
 	err = isp_cmd_ch_buffer_pool_config_set(isp, ch,
-						CISP_POOL_TYPE_META_CAPTURE);
+						CISP_POOL_TYPE_META_CAPTURE, 1);
 	if (err)
 		return err;
+
+	if (isp->hw->gen >= ISP_GEN_T8112) {
+		err = isp_cmd_ch_buffer_pool_config_set(isp, ch,
+							CISP_POOL_TYPE_RENDERED, 2);
+		if (err)
+			return err;
+	}
 
 	return 0;
 }

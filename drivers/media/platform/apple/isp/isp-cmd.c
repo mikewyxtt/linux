@@ -244,7 +244,10 @@ int isp_cmd_ch_crop_set(struct apple_isp *isp, u32 chan, u32 x1, u32 y1, u32 x2,
 			u32 y2)
 {
 	struct cmd_ch_crop_set args = {
-		.opcode = CISP_OPCODE(CISP_CMD_CH_CROP_SET),
+		.opcode = CISP_OPCODE(
+			isp->hw->gen == ISP_GEN_T8112
+			? CISP_CMD_CH_CROP_SCL1_SET
+			: CISP_CMD_CH_CROP_SET),
 		.chan = chan,
 		.x1 = x1,
 		.y1 = y1,
@@ -258,7 +261,10 @@ int isp_cmd_ch_output_config_set(struct apple_isp *isp, u32 chan, u32 width,
 				 u32 height, u32 colorspace, u32 format)
 {
 	struct cmd_ch_output_config_set args = {
-		.opcode = CISP_OPCODE(CISP_CMD_CH_OUTPUT_CONFIG_SET),
+		.opcode = CISP_OPCODE(
+			isp->hw->gen == ISP_GEN_T8112
+			? CISP_CMD_CH_OUTPUT_CONFIG_SCL1_SET
+			: CISP_CMD_CH_OUTPUT_CONFIG_SET),
 		.chan = chan,
 		.width = width,
 		.height = height,
@@ -349,19 +355,21 @@ int isp_cmd_ch_buffer_recycle_start(struct apple_isp *isp, u32 chan)
 	return CISP_SEND_IN(isp, args);
 }
 
-int isp_cmd_ch_buffer_pool_config_set(struct apple_isp *isp, u32 chan, u16 type)
+int isp_cmd_ch_buffer_pool_config_set(struct apple_isp *isp, u32 chan, u16 type, int blocks)
 {
 	struct cmd_ch_buffer_pool_config_set args = {
 		.opcode = CISP_OPCODE(CISP_CMD_CH_BUFFER_POOL_CONFIG_SET),
 		.chan = chan,
 		.type = type,
 		.count = 16,
-		.meta_size0 = ISP_META_SIZE,
-		.meta_size1 = ISP_META_SIZE,
-		.data_blocks = 1,
+		.meta_size0 = isp->hw->meta_size,
+		.meta_size1 = isp->hw->meta_size,
+		.unk0 = 0x12c928c00,
+		.unk1 = 0x12e009a70,
+		.unk2 = 0x19148ada8,
+		.data_blocks = blocks,
 		.compress = 0,
 	};
-	memset(args.zero, 0, sizeof(u32) * 0x1f);
 	return CISP_SEND_INOUT(isp, args);
 }
 

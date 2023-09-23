@@ -20,7 +20,13 @@
 #define ISP_MAX_CHANNELS      6
 #define ISP_IPC_MESSAGE_SIZE  64
 #define ISP_IPC_FLAG_ACK      0x1
-#define ISP_META_SIZE	      0x4640
+#define ISP_META_SIZE_T8103      0x4640
+#define ISP_META_SIZE_T8112      0x4840
+
+enum isp_generation {
+	ISP_GEN_T8103,
+	ISP_GEN_T8112,
+};
 
 struct isp_surf {
 	struct drm_mm_node *mm;
@@ -63,6 +69,7 @@ struct isp_channel {
 };
 
 struct apple_isp_hw {
+	enum isp_generation gen;
 	u32 platform_id;
 	u64 pmu_base;
 
@@ -83,6 +90,8 @@ struct apple_isp_hw {
 	u64 bandwidth_base;
 	u8 bandwidth_bit;
 	u8 bandwidth_size;
+
+	u32 meta_size;
 };
 
 enum isp_sensor_id {

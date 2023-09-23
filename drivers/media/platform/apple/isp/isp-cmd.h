@@ -54,11 +54,13 @@
 #define CISP_CMD_CH_SENSOR_PERMODULE_LSC_GRID_GET	     0x0511
 #define CISP_CMD_CH_FOCUS_LIMITS_GET			     0x0701
 #define CISP_CMD_CH_CROP_SET				     0x0801
+#define CISP_CMD_CH_CROP_SCL1_SET			     0x080c
 #define CISP_CMD_CH_ALS_ENABLE				     0x0a1c
 #define CISP_CMD_CH_ALS_DISABLE				     0x0a1d
 #define CISP_CMD_CH_CNR_START				     0x0a2f
 #define CISP_CMD_CH_MBNR_ENABLE				     0x0a3a
 #define CISP_CMD_CH_OUTPUT_CONFIG_SET			     0x0b01
+#define CISP_CMD_CH_OUTPUT_CONFIG_SCL1_SET		     0x0b09
 #define CISP_CMD_CH_PREVIEW_STREAM_SET			     0x0b0d
 #define CISP_CMD_CH_SEMANTIC_VIDEO_ENABLE		     0x0b17
 #define CISP_CMD_CH_SEMANTIC_AWB_ENABLE			     0x0b18
@@ -414,7 +416,10 @@ struct cmd_ch_buffer_pool_config_set {
 	u16 count;
 	u32 meta_size0;
 	u32 meta_size1;
-	u32 zero[0x1f];
+	u64 unk0;
+	u64 unk1;
+	u64 unk2;
+	u32 zero[0x19];
 	u32 data_blocks;
 	u32 compress;
 } __packed;
@@ -430,7 +435,7 @@ int isp_cmd_ch_buffer_recycle_mode_set(struct apple_isp *isp, u32 chan,
 				       u32 mode);
 int isp_cmd_ch_buffer_recycle_start(struct apple_isp *isp, u32 chan);
 int isp_cmd_ch_buffer_pool_config_set(struct apple_isp *isp, u32 chan,
-				      u16 type);
+				      u16 type, int blocks);
 int isp_cmd_ch_buffer_pool_return(struct apple_isp *isp, u32 chan);
 
 struct cmd_apple_ch_temporal_filter_start {
