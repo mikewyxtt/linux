@@ -119,6 +119,17 @@ int isp_cmd_set_dsid_clr_req_base2(struct apple_isp *isp, u64 dsid_clr_base0,
 	return CISP_SEND_IN(isp, args);
 }
 
+int isp_cmd_set_dsid_clr_req_base(struct apple_isp *isp, u64 dsid_clr_base,
+				  u32 dsid_clr_range)
+{
+	struct cmd_set_dsid_clr_req_base args = {
+		.opcode = CISP_OPCODE(CISP_CMD_SET_DSID_CLR_REG_BASE),
+		.dsid_clr_base = dsid_clr_base,
+		.dsid_clr_range = dsid_clr_range,
+	};
+	return CISP_SEND_IN(isp, args);
+}
+
 int isp_cmd_pmp_ctrl_set(struct apple_isp *isp, u64 clock_scratch,
 			 u64 clock_base, u8 clock_bit, u8 clock_size,
 			 u64 bandwidth_scratch, u64 bandwidth_base,
@@ -547,6 +558,25 @@ int isp_cmd_ch_semantic_awb_enable(struct apple_isp *isp, u32 chan, u32 enable)
 		.opcode = CISP_OPCODE(CISP_CMD_CH_SEMANTIC_AWB_ENABLE),
 		.chan = chan,
 		.enable = enable,
+	};
+	return CISP_SEND_IN(isp, args);
+}
+
+int isp_cmd_ch_lpdp_hs_receiver_tuning_set(struct apple_isp *isp, u32 chan, u32 unk1, u32 unk2)
+{
+	struct cmd_ch_lpdp_hs_receiver_tuning_set args = {
+		.opcode = CISP_OPCODE(CISP_CMD_CH_LPDP_HS_RECEIVER_TUNING_SET),
+		.chan = chan,
+		.unk1 = unk1,
+		.unk2 = unk2,
+		.unk3 = 7,
+		.unk4 = 1,
+		.unk5 = 6,
+		.unk6 = 1,
+		.unk7 = 0x558,
+		.unk8 = 9,
+		.unk9 = 0x1410,
+		.unk10 = 2,
 	};
 	return CISP_SEND_IN(isp, args);
 }

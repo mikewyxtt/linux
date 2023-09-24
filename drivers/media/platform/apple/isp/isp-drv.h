@@ -73,6 +73,7 @@ struct apple_isp_hw {
 	u32 platform_id;
 	u64 pmu_base;
 
+	int dsid_count;
 	u64 dsid_clr_base0;
 	u64 dsid_clr_base1;
 	u64 dsid_clr_base2;

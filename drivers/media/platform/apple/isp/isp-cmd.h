@@ -52,6 +52,7 @@
 #define CISP_CMD_CH_SENSOR_NVM_GET			     0x0501
 #define CISP_CMD_CH_SENSOR_PERMODULE_LSC_INFO_GET	     0x0507
 #define CISP_CMD_CH_SENSOR_PERMODULE_LSC_GRID_GET	     0x0511
+#define CISP_CMD_CH_LPDP_HS_RECEIVER_TUNING_SET		     0x051b
 #define CISP_CMD_CH_FOCUS_LIMITS_GET			     0x0701
 #define CISP_CMD_CH_CROP_SET				     0x0801
 #define CISP_CMD_CH_CROP_SCL1_SET			     0x080c
@@ -73,6 +74,7 @@
 #define CISP_CMD_IPC_ENDPOINT_SET2			     0x300c
 #define CISP_CMD_IPC_ENDPOINT_UNSET2			     0x300d
 #define CISP_CMD_SET_DSID_CLR_REG_BASE2			     0x3204
+#define CISP_CMD_SET_DSID_CLR_REG_BASE			     0x3205
 #define CISP_CMD_APPLE_CH_AE_METERING_MODE_SET		     0x8206
 #define CISP_CMD_APPLE_CH_AE_FD_SCENE_METERING_CONFIG_SET    0x820e
 #define CISP_CMD_APPLE_CH_AE_FLICKER_FREQ_UPDATE_CURRENT_SET 0x8212
@@ -89,6 +91,7 @@
 #define CISP_POOL_TYPE_RAW				     0x3
 #define CISP_POOL_TYPE_STAT				     0x4
 #define CISP_POOL_TYPE_META_CAPTURE			     0x8
+#define CISP_POOL_TYPE_UNK_9				     0x9
 
 #define CISP_COLORSPACE_REC709				     0x1
 #define CISP_OUTPUT_FORMAT_NV12				     0x0
@@ -146,6 +149,13 @@ struct cmd_set_dsid_clr_req_base2 {
 } __packed;
 static_assert(sizeof(struct cmd_set_dsid_clr_req_base2) == 0x38);
 
+struct cmd_set_dsid_clr_req_base {
+	u64 opcode;
+	u64 dsid_clr_base;
+	u32 dsid_clr_range;
+} __packed;
+static_assert(sizeof(struct cmd_set_dsid_clr_req_base) == 0x14);
+
 struct cmd_pmp_ctrl_set {
 	u64 opcode;
 	u64 clock_scratch;
@@ -177,6 +187,8 @@ int isp_cmd_print_enable(struct apple_isp *isp, u32 enable);
 int isp_cmd_trace_enable(struct apple_isp *isp, u32 enable);
 int isp_cmd_config_get(struct apple_isp *isp, struct cmd_config_get *args);
 int isp_cmd_set_isp_pmu_base(struct apple_isp *isp, u64 pmu_base);
+int isp_cmd_set_dsid_clr_req_base(struct apple_isp *isp, u64 dsid_clr_base,
+				  u32 dsid_clr_range);
 int isp_cmd_set_dsid_clr_req_base2(struct apple_isp *isp, u64 dsid_clr_base0,
 				   u64 dsid_clr_base1, u64 dsid_clr_base2,
 				   u64 dsid_clr_base3, u32 dsid_clr_range0,
@@ -371,6 +383,22 @@ struct cmd_ch_sif_pixel_format_set {
 } __packed;
 static_assert(sizeof(struct cmd_ch_sif_pixel_format_set) == 0x14);
 
+struct cmd_ch_lpdp_hs_receiver_tuning_set {
+	u64 opcode;
+	u32 chan;
+	u32 unk1;
+	u32 unk2;
+	u16 unk3;
+	u16 unk4;
+	u32 unk5;
+	u32 unk6;
+	u32 unk7;
+	u32 unk8;
+	u32 unk9;
+	u32 unk10;
+} __packed;
+static_assert(sizeof(struct cmd_ch_lpdp_hs_receiver_tuning_set) == 0x30);
+
 int isp_cmd_ch_start(struct apple_isp *isp, u32 chan);
 int isp_cmd_ch_stop(struct apple_isp *isp, u32 chan);
 int isp_cmd_ch_info_get(struct apple_isp *isp, u32 chan,
@@ -395,6 +423,7 @@ int isp_cmd_ch_cnr_start(struct apple_isp *isp, u32 chan);
 int isp_cmd_ch_mbnr_enable(struct apple_isp *isp, u32 chan, u32 use_case,
 			   u32 mode, u32 enable_chroma);
 int isp_cmd_ch_sif_pixel_format_set(struct apple_isp *isp, u32 chan);
+int isp_cmd_ch_lpdp_hs_receiver_tuning_set(struct apple_isp *isp, u32 chan, u32 unk1, u32 unk2);
 
 struct cmd_ch_buffer_recycle_mode_set {
 	u64 opcode;

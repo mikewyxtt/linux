@@ -258,6 +258,7 @@ static const struct apple_isp_hw apple_isp_hw_t8103 = {
 	.platform_id = 0x1,
 	.pmu_base = 0x23b704000,
 
+	.dsid_count = 4,
 	.dsid_clr_base0 = 0x200014000,
 	.dsid_clr_base1 = 0x200054000,
 	.dsid_clr_base2 = 0x200094000,
@@ -284,6 +285,7 @@ static const struct apple_isp_hw apple_isp_hw_t6000 = {
 	.platform_id = 0x3,
 	.pmu_base = 0x28e584000,
 
+	.dsid_count = 1,
 	.dsid_clr_base0 = 0x200014000,
 	.dsid_clr_base1 = 0x200054000,
 	.dsid_clr_base2 = 0x200094000,
@@ -310,6 +312,7 @@ static const struct apple_isp_hw apple_isp_hw_t8110 = {
 	.platform_id = 0xe, // J413AP
 	.pmu_base = 0x23b704000,
 
+	.dsid_count = 4,
 	.dsid_clr_base0 = 0x200014000, // TODO
 	.dsid_clr_base1 = 0x200054000,
 	.dsid_clr_base2 = 0x200094000,
@@ -336,14 +339,9 @@ static const struct apple_isp_hw apple_isp_hw_t6020 = {
 	.platform_id = 0x7, // J416cAP
 	.pmu_base = 0x290284000,
 
-	.dsid_clr_base0 = 0x200014000, // TODO
-	.dsid_clr_base1 = 0x200054000,
-	.dsid_clr_base2 = 0x200094000,
-	.dsid_clr_base3 = 0x2000d4000,
+	.dsid_count = 1,
+	.dsid_clr_base0 = 0x200f14000, // TODO
 	.dsid_clr_range0 = 0x1000,
-	.dsid_clr_range1 = 0x1000,
-	.dsid_clr_range2 = 0x1000,
-	.dsid_clr_range3 = 0x1000,
 
 	.clock_scratch = 0x28e3d10a8,
 	.clock_base = 0x0,

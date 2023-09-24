@@ -430,7 +430,7 @@ static int isp_ch_configure_capture(struct apple_isp *isp, u32 ch)
 		return err;
 
 	err = isp_cmd_ch_output_config_set(isp, ch, fmt->width, fmt->height,
-					   CISP_COLORSPACE_REC709,
+					   2,
 					   CISP_OUTPUT_FORMAT_NV12);
 	if (err)
 		return err;
@@ -496,9 +496,17 @@ static int isp_ch_configure_capture(struct apple_isp *isp, u32 ch)
 	if (err)
 		return err;
 
+	/*
 	if (isp->hw->gen >= ISP_GEN_T8112) {
 		err = isp_cmd_ch_buffer_pool_config_set(isp, ch,
 							CISP_POOL_TYPE_RENDERED, 2);
+		if (err)
+			return err;
+	}
+	*/
+
+	if (isp->hw->gen >= ISP_GEN_T8112) {
+		err = isp_cmd_ch_lpdp_hs_receiver_tuning_set(isp, ch, 1, 15);
 		if (err)
 			return err;
 	}
