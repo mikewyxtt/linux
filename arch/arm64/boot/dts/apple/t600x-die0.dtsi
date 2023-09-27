@@ -507,6 +507,7 @@
 		interrupt-parent = <&aic>;
 		interrupts = <AIC_IRQ 0 543 IRQ_TYPE_LEVEL_HIGH>;
 		power-domains = <&ps_isp_sys>;
+		status = "disabled";
 	};
 
 	isp_dart1: iommu@3860f4000 {
@@ -516,6 +517,7 @@
 		interrupt-parent = <&aic>;
 		interrupts = <AIC_IRQ 0 543 IRQ_TYPE_LEVEL_HIGH>;
 		power-domains = <&ps_isp_sys>;
+		status = "disabled";
 	};
 
 	isp_dart2: iommu@3860fc000 {
@@ -525,6 +527,7 @@
 		interrupt-parent = <&aic>;
 		interrupts = <AIC_IRQ 0 543 IRQ_TYPE_LEVEL_HIGH>;
 		power-domains = <&ps_isp_sys>;
+		status = "disabled";
 	};
 
 	isp: isp@384000000 {
@@ -544,6 +547,8 @@
 
 		memory-region = <&isp_heap>;
 		memory-region-names = "heap";
+
+		status = "disabled";
 	};
 
 	pcie0_dart_0: iommu@581008000 {

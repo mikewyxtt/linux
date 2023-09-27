@@ -237,3 +237,11 @@
 	tp_accel {
 	};
 };
+
+#if 0
+&isp {
+	apple,platform-id = <15>;
+};
+
+#include "isp-imx558.dtsi"
+#endif

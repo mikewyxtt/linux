@@ -626,6 +626,8 @@
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ 251 IRQ_TYPE_LEVEL_HIGH>;
 			power-domains = <&ps_isp_sys>;
+
+			status = "disabled";
 		};
 
 		isp_dart1: iommu@22c0f4000 {
@@ -635,6 +637,8 @@
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ 251 IRQ_TYPE_LEVEL_HIGH>;
 			power-domains = <&ps_isp_sys>;
+
+			status = "disabled";
 		};
 
 		isp_dart2: iommu@22c0fc000 {
@@ -644,6 +648,8 @@
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ 251 IRQ_TYPE_LEVEL_HIGH>;
 			power-domains = <&ps_isp_sys>;
+
+			status = "disabled";
 		};
 
 		isp: isp@22a000000 {
@@ -665,6 +671,8 @@
 			apple,dart-vm-size = <0x0 0xa0000000>;
 			memory-region = <&isp_heap>;
 			memory-region-names = "heap";
+
+			status = "disabled";
 		};
 
 		sio_dart: iommu@235004000 {

@@ -459,3 +459,9 @@
 		};
 	};
 };
+
+&isp {
+	apple,platform-id = <3>;
+};
+
+#include "isp-imx558.dtsi"

@@ -244,3 +244,11 @@
 	tp_accel {
 	};
 };
+
+#if 0
+&isp {
+	apple,platform-id = <6>;
+};
+
+#include "isp-imx248.dtsi"
+#endif

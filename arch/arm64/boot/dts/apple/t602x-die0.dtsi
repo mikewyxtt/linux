@@ -275,6 +275,7 @@
 		power-domains = <&ps_isp_sys>;
 
 		apple,dma-range = <0x100 0x0 0x1 0x0>;
+		status = "disabled";
 	};
 
 	isp_dart2: iommu@3860fc000 {
@@ -286,6 +287,7 @@
 		power-domains = <&ps_isp_sys>;
 
 		apple,dma-range = <0x100 0x0 0x1 0x0>;
+		status = "disabled";
 	};
 
 	isp: isp@384000000 {
@@ -304,6 +306,8 @@
 
 		memory-region = <&isp_heap>;
 		memory-region-names = "heap";
+
+		status = "disabled";
 	};
 
 	disp0_dart: iommu@389304000 {
