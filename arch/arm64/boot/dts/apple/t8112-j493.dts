@@ -19,6 +19,7 @@
 
 	aliases {
 		bluetooth0 = &bluetooth0;
+		isp = &isp;
 		wifi0 = &wifi0;
 		keyboard = &keyboard;
 		touchbar0 = &touchbar0;
