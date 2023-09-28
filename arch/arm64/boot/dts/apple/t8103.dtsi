@@ -655,10 +655,11 @@
 		isp: isp@22a000000 {
 			compatible = "apple,t8103-isp", "apple,isp";
 			iommus = <&isp_dart0 0>, <&isp_dart1 0>, <&isp_dart2 0>;
-			reg-names = "coproc", "mbox", "gpio";
+			reg-names = "coproc", "mbox", "gpio", "mbox2";
 			reg = <0x2 0x2a000000 0x0 0x2000000>,
 				<0x2 0x2c104000 0x0 0x100>,
-				<0x2 0x2c104170 0x0 0x100>;
+				<0x2 0x2c104170 0x0 0x100>,
+				<0x2 0x2c1043f0 0x0 0x100>;
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ 246 IRQ_TYPE_LEVEL_HIGH>;
 			power-domains = <&ps_isp_sys>, <&ps_isp_set0>,
