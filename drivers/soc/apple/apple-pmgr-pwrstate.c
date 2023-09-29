@@ -98,34 +98,12 @@ static int apple_pmgr_ps_set(struct generic_pm_domain *genpd, u32 pstate, bool a
 
 	ret = regmap_read_poll_timeout_atomic(
 		ps->regmap, ps->offset, cur,
-		(FIELD_GET(APPLE_PMGR_PS_ACTUAL, cur) == pstate), 1,
+		FIELD_GET(APPLE_PMGR_PS_ACTUAL, cur) == pstate, 1,
 		APPLE_PMGR_PS_SET_TIMEOUT);
 
-	/*
-	 * This logic is a guess based on observed hardware behavior, not something
-	 * macOS does. We don't yet know exactly what is going on here...
-	 */
-	if (ret < 0) {
+	if (ret < 0)
 		dev_err(ps->dev, "PS %s: Failed to reach power state 0x%x (now: 0x%x)\n",
 			genpd->name, pstate, reg);
-
-		if (cur & APPLE_PMGR_BUSY) {
-			regmap_write(ps->regmap, ps->offset, reg | APPLE_PMGR_PS_RESET);
-
-			ret = regmap_read_poll_timeout_atomic(
-				ps->regmap, ps->offset, cur,
-				(FIELD_GET(APPLE_PMGR_PS_ACTUAL, cur) == pstate), 1,
-				APPLE_PMGR_PS_SET_TIMEOUT);
-			if (ret < 0)
-				dev_info(ps->dev, "PS %s: Still failed to reach power state 0x%x (now: 0x%x)\n",
-					 genpd->name, pstate, cur);
-			else
-				dev_info(ps->dev, "PS %s: Reached power state 0x%x after reset (now: 0x%x)\n",
-					 genpd->name, pstate, cur);
-
-			regmap_write(ps->regmap, ps->offset, reg);
-		}
-	}
 
 	if (auto_enable) {
 		/* Not all devices implement this; this is a no-op where not implemented. */
