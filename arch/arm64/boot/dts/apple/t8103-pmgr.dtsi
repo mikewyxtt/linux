@@ -806,7 +806,6 @@
 		#reset-cells = <0>;
 		label = "isp_sys";
 		power-domains = <&ps_rmx>;
-		apple,always-on; /* Locked on for ISP DART CTRR */
 	};
 
 	ps_venc_sys: power-controller@408 {
