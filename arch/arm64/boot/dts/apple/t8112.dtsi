@@ -611,7 +611,7 @@
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ 269 IRQ_TYPE_LEVEL_HIGH>;
 			power-domains = <&ps_isp_sys>, <&ps_isp_set0>,
-				<&ps_isp_set1>, <&ps_isp_set2>, <&ps_isp_set3>,
+				<&ps_isp_set1>, <&ps_isp_set2>, <&ps_isp_fe>,
 				<&ps_isp_set4>, <&ps_isp_set5>, <&ps_isp_set6>,
 				<&ps_isp_set7>, <&ps_isp_set8>, <&ps_isp_set9>,
 				<&ps_isp_set10>, <&ps_isp_set11>,
