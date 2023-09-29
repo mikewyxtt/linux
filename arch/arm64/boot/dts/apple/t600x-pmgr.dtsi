@@ -1468,7 +1468,7 @@
 		power-domains = <&ps_isp_set0>;
 	};
 
-	DIE_NODE(ps_isp_set2): power-controller@4008 {
+	DIE_NODE(ps_isp_fe): power-controller@4008 {
 		compatible = "apple,t6000-pmgr-pwrstate", "apple,pmgr-pwrstate";
 		reg = <0x4008 4>;
 		#power-domain-cells = <0>;
@@ -1483,7 +1483,7 @@
 		#power-domain-cells = <0>;
 		#reset-cells = <0>;
 		label = "isp_set3";
-		power-domains = <&ps_isp_set2>;
+		power-domains = <&ps_isp_fe>;
 	};
 
 	DIE_NODE(ps_isp_set4): power-controller@4020 {
