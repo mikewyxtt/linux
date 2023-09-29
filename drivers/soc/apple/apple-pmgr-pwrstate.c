@@ -21,8 +21,8 @@
 #define APPLE_PMGR_AUTO_ENABLE  BIT(28)
 #define APPLE_PMGR_PS_AUTO      GENMASK(27, 24)
 #define APPLE_PMGR_PS_MIN       GENMASK(19, 16)
-#define APPLE_PMGR_CLEAR_ERROR  BIT(12)
-#define APPLE_PMGR_ERROR        BIT(11)
+#define APPLE_PMGR_PS_RESET     BIT(12)
+#define APPLE_PMGR_BUSY         BIT(11)
 #define APPLE_PMGR_DEV_DISABLE  BIT(10)
 #define APPLE_PMGR_WAS_CLKGATED BIT(9)
 #define APPLE_PMGR_WAS_PWRGATED BIT(8)
@@ -73,12 +73,23 @@ static int apple_pmgr_ps_set(struct generic_pm_domain *genpd, u32 pstate, bool a
 		if (ps->force_disable)
 			reg_pre |= APPLE_PMGR_DEV_DISABLE;
 		if (ps->force_reset)
-			reg_pre |= APPLE_PMGR_CLEAR_ERROR;
+			reg_pre |= APPLE_PMGR_PS_RESET;
 
 		regmap_write(ps->regmap, ps->offset, reg_pre);
+
+		ret = regmap_read_poll_timeout_atomic(
+			ps->regmap, ps->offset, cur,
+			(cur & (APPLE_PMGR_DEV_DISABLE | APPLE_PMGR_PS_RESET)) ==
+			(reg_pre & (APPLE_PMGR_DEV_DISABLE | APPLE_PMGR_PS_RESET)), 1,
+			APPLE_PMGR_PS_SET_TIMEOUT);
+
+		if (ret < 0)
+			dev_err(ps->dev, "PS %s: Failed to set reset/disable bits (now: 0x%x)\n",
+				genpd->name, reg);
 	}
 
-	reg &= ~(APPLE_PMGR_AUTO_ENABLE | APPLE_PMGR_FLAGS | APPLE_PMGR_PS_TARGET);
+	reg &= ~(APPLE_PMGR_DEV_DISABLE | APPLE_PMGR_PS_RESET |
+		 APPLE_PMGR_AUTO_ENABLE | APPLE_PMGR_FLAGS | APPLE_PMGR_PS_TARGET);
 	reg |= FIELD_PREP(APPLE_PMGR_PS_TARGET, pstate);
 
 	dev_dbg(ps->dev, "PS %s: pwrstate = 0x%x: 0x%x\n", genpd->name, pstate, reg);
@@ -98,8 +109,8 @@ static int apple_pmgr_ps_set(struct generic_pm_domain *genpd, u32 pstate, bool a
 		dev_err(ps->dev, "PS %s: Failed to reach power state 0x%x (now: 0x%x)\n",
 			genpd->name, pstate, reg);
 
-		if (cur & APPLE_PMGR_ERROR) {
-			regmap_write(ps->regmap, ps->offset, reg | APPLE_PMGR_CLEAR_ERROR);
+		if (cur & APPLE_PMGR_BUSY) {
+			regmap_write(ps->regmap, ps->offset, reg | APPLE_PMGR_PS_RESET);
 
 			ret = regmap_read_poll_timeout_atomic(
 				ps->regmap, ps->offset, cur,
