@@ -1011,7 +1011,7 @@
 		#reset-cells = <0>;
 		label = "isp_set0";
 		power-domains = <&ps_isp_sys>;
-		apple,pre-state = <0x400>;
+		apple,force-disable;
 	};
 
 	ps_isp_set1: power-controller@4008 {
@@ -1021,7 +1021,8 @@
 		#reset-cells = <0>;
 		label = "isp_set1";
 		power-domains = <&ps_isp_set0>;
-		apple,pre-state = <0x1400>;
+		apple,force-disable;
+		apple,force-reset;
 	};
 
 	ps_isp_set2: power-controller@4010 {
@@ -1031,7 +1032,8 @@
 		#reset-cells = <0>;
 		label = "isp_set2";
 		power-domains = <&ps_isp_set1>;
-		apple,pre-state = <0x1400>;
+		apple,force-disable;
+		apple,force-reset;
 	};
 
 	ps_isp_set3: power-controller@4018 {
