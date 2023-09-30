@@ -1056,31 +1056,31 @@
 		power-domains = <&ps_isp_set8>;
 	};
 
-	ps_isp_set10: power-controller@4050 {
+	ps_isp_set12: power-controller@4050 {
 		compatible = "apple,t8103-pmgr-pwrstate", "apple,pmgr-pwrstate";
 		reg = <0x4050 4>;
 		#power-domain-cells = <0>;
 		#reset-cells = <0>;
 		label = "isp_set10";
-		power-domains = <&ps_isp_set9>;
+		power-domains = <&ps_isp_set11>;
 	};
 
-	ps_isp_set11: power-controller@4058 {
+	ps_isp_set10: power-controller@4058 {
 		compatible = "apple,t8103-pmgr-pwrstate", "apple,pmgr-pwrstate";
 		reg = <0x4058 4>;
 		#power-domain-cells = <0>;
 		#reset-cells = <0>;
 		label = "isp_set11";
-		power-domains = <&ps_isp_set10>;
+		power-domains = <&ps_isp_set9>;
 	};
 
-	ps_isp_set12: power-controller@4060 {
+	ps_isp_set11: power-controller@4060 {
 		compatible = "apple,t8103-pmgr-pwrstate", "apple,pmgr-pwrstate";
 		reg = <0x4060 4>;
 		#power-domain-cells = <0>;
 		#reset-cells = <0>;
 		label = "isp_set12";
-		power-domains = <&ps_isp_set11>;
+		power-domains = <&ps_isp_set10>;
 	};
 
 	ps_venc_dma: power-controller@8000 {
