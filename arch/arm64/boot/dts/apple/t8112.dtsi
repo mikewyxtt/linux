@@ -22,6 +22,7 @@
 
 	aliases {
 		gpu = &gpu;
+		isp = &isp;
 	};
 
 	cpus {

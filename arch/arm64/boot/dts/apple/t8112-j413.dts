@@ -222,10 +222,8 @@
 	};
 };
 
-#if 0
 &isp {
 	apple,platform-id = <14>;
 };
 
-#include "isp-imx558.dtsi"
-#endif
+#include "isp-imx558-cfg0.dtsi"
