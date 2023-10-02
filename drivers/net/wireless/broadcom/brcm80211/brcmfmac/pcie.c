@@ -2208,6 +2208,11 @@ static int brcmf_pcie_read_otp(struct brcmf_pciedev_info *devinfo)
 		base = 0x113c;
 		words = 0x170;
 		break;
+	case BRCM_CC_4388_CHIP_ID:
+		coreid = BCMA_CORE_GCI;
+		base = 0x115c;
+		words = 0x150;
+		break;
 	default:
 		/* OTP not supported on this chip */
 		return 0;
