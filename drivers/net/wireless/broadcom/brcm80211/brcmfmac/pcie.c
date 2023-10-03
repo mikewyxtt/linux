@@ -407,6 +407,7 @@ struct brcmf_pciedev_info {
 	void __iomem *regs;
 	void __iomem *tcm;
 	u32 fw_size;
+	bool skip_reset_vector;
 	struct brcmf_chip *ci;
 	u32 coreid;
 	struct brcmf_pcie_shared_info shared;
@@ -1975,6 +1976,8 @@ static int brcmf_pcie_add_signature(struct brcmf_pciedev_info *devinfo,
 	if (err)
 		return err;
 
+	devinfo->skip_reset_vector = true;
+
 	return 0;
 }
 
@@ -2214,7 +2217,8 @@ static void brcmf_pcie_buscore_activate(void *ctx, struct brcmf_chip *chip,
 {
 	struct brcmf_pciedev_info *devinfo = (struct brcmf_pciedev_info *)ctx;
 
-	brcmf_pcie_write_tcm32(devinfo, 0, rstvec);
+	if (!devinfo->skip_reset_vector)
+		brcmf_pcie_write_tcm32(devinfo, 0, rstvec);
 }
 
 
