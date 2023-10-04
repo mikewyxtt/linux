@@ -50,8 +50,8 @@ int ipc_bt_handle(struct apple_isp *isp, struct isp_channel *chan)
 	u32 count;
 	int err = 0;
 
-	printk("H2T: 0x%llx 0x%llx 0x%llx\n", (long long)req->arg0,
-	       (long long)req->arg1, (long long)req->arg2);
+	/* printk("H2T: 0x%llx 0x%llx 0x%llx\n", (long long)req->arg0,
+	       (long long)req->arg1, (long long)req->arg2); */
 
 	if (req->arg1 < sizeof(struct isp_buflist)) {
 		dev_err(isp->dev, "%s: Bad length 0x%llx\n", chan->name,
@@ -73,8 +73,8 @@ int ipc_bt_handle(struct apple_isp *isp, struct isp_channel *chan)
 	for (int i = 0; i < count; i++) {
 		struct isp_buflist_buffer *bufd = &bl->buffers[i];
 
-		printk("Return: 0x%llx (%d)\n", bufd->iovas[0],
-		       bufd->pool_type);
+		/* printk("Return: 0x%llx (%d)\n", bufd->iovas[0],
+		       bufd->pool_type); */
 
 		if (bufd->pool_type == 0) {
 			for (int j = 0; j < ARRAY_SIZE(isp->meta_surfs); j++) {
@@ -138,8 +138,8 @@ static int isp_submit_buffers(struct apple_isp *isp)
 		if (meta->submitted)
 			continue;
 
-		printk("Submit: 0x%llx .. 0x%llx (meta)\n", meta->iova,
-		       meta->iova + meta->size);
+		/* printk("Submit: 0x%llx .. 0x%llx (meta)\n", meta->iova,
+		       meta->iova + meta->size); */
 
 		bufd->num_planes = 1;
 		bufd->pool_type = 0;
@@ -165,9 +165,9 @@ static int isp_submit_buffers(struct apple_isp *isp)
 			offset += fmt->plane_size[j];
 		}
 
-		printk("Submit: 0x%llx .. 0x%llx (render)\n",
+		/* printk("Submit: 0x%llx .. 0x%llx (render)\n",
 		       buf->surfs[0].iova,
-		       buf->surfs[0].iova + buf->surfs[0].size);
+		       buf->surfs[0].iova + buf->surfs[0].size); */
 		bufd++;
 		bl->num_buffers++;
 
