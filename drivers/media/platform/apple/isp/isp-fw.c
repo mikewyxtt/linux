@@ -212,6 +212,7 @@ static int isp_reset_coproc(struct apple_isp *isp)
 {
 	int retries;
 	u32 status;
+	u32 val;
 
 	isp_coproc_write32(isp, ISP_COPROC_EDPRCR, 0x2);
 
