@@ -436,7 +436,7 @@
 				sound-dai = <&mca 0>;
 			};
 			codec {
-				sound-dai = <&speaker_tweeter>, <&speaker_woofer>;
+				sound-dai = <&speaker_woofer>, <&speaker_tweeter>;
 			};
 		};
 
