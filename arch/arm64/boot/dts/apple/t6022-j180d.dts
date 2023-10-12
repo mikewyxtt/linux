@@ -385,6 +385,8 @@
 		shutdown-gpios = <&pinctrl_ap 57 GPIO_ACTIVE_HIGH>;
 		#sound-dai-cells = <0>;
 		sound-name-prefix = "Tweeter";
+		ti,imon-slot-no = <4>;
+		ti,vmon-slot-no = <6>;
 	};
 
 	speaker_woofer: codec@39 {
@@ -393,6 +395,8 @@
 		shutdown-gpios = <&pinctrl_ap 57 GPIO_ACTIVE_HIGH>;
 		#sound-dai-cells = <0>;
 		sound-name-prefix = "Woofer";
+		ti,imon-slot-no = <0>;
+		ti,vmon-slot-no = <2>;
 	};
 };
 
