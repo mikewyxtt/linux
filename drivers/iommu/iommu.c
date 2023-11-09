@@ -334,12 +334,13 @@ static u32 dev_iommu_get_max_pasids(struct device *dev)
 	return min_t(u32, max_pasids, dev->iommu->iommu_dev->max_pasids);
 }
 
+DEFINE_MUTEX(iommu_probe_device_lock);
+
 static int __iommu_probe_device(struct device *dev, struct list_head *group_list)
 {
 	const struct iommu_ops *ops = dev->bus->iommu_ops;
 	struct iommu_device *iommu_dev;
 	struct iommu_group *group;
-	static DEFINE_MUTEX(iommu_probe_device_lock);
 	int ret;
 
 	if (!ops)
@@ -1978,6 +1979,15 @@ static int __iommu_attach_device(struct iommu_domain *domain,
 
 	if (unlikely(domain->ops->attach_dev == NULL))
 		return -ENODEV;
+
+	/*
+	 * Ensure we do not try to attach devices to FQ domains if the
+	 * IOMMU does not support them. We can safely fall back to
+	 * non-FQ.
+	 */
+	if (domain->type == IOMMU_DOMAIN_DMA_FQ &&
+	    !device_iommu_capable(dev, IOMMU_CAP_DEFERRED_FLUSH))
+		domain->type = IOMMU_DOMAIN_DMA;
 
 	ret = domain->ops->attach_dev(domain, dev);
 	if (ret)
