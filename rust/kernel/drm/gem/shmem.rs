@@ -199,8 +199,14 @@ impl<T: DriverObject> Object<T> {
     pub fn vmap(&self) -> Result<VMap<T>> {
         let mut map: MaybeUninit<bindings::iosys_map> = MaybeUninit::uninit();
 
-        // SAFETY: drm_gem_shmem_vmap is thread-safe
-        to_result(unsafe { bindings::drm_gem_shmem_vmap(self.mut_shmem(), map.as_mut_ptr()) })?;
+        // SAFETY: drm_gem_shmem_vmap can be called with the DMA reservation lock held
+        to_result(unsafe {
+            let resv = self.obj.base.resv as *const _ as *mut _;
+            bindings::dma_resv_lock(resv, core::ptr::null_mut());
+            let ret = bindings::drm_gem_shmem_vmap(self.mut_shmem(), map.as_mut_ptr());
+            bindings::dma_resv_unlock(resv);
+            ret
+        })?;
 
         // SAFETY: if drm_gem_shmem_vmap did not fail, map is initialized now
         let map = unsafe { map.assume_init() };
@@ -304,9 +310,12 @@ impl<T: DriverObject> VMap<T> {
 
 impl<T: DriverObject> Drop for VMap<T> {
     fn drop(&mut self) {
-        // SAFETY: This function is thread-safe
+        // SAFETY: This function is safe to call with the DMA reservation lock held
         unsafe {
+            let resv = self.owner.obj.base.resv as *const _ as *mut _;
+            bindings::dma_resv_lock(resv, core::ptr::null_mut());
             bindings::drm_gem_shmem_vunmap(self.owner.mut_shmem(), &mut self.map);
+            bindings::dma_resv_unlock(resv);
         }
     }
 }
