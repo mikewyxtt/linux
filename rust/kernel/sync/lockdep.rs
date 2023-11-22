@@ -123,15 +123,20 @@ fn caller_lock_class_inner() -> Result<&'static DynLockClassKey> {
     if ptr.is_null() {
         let new_element = Box::pin_init(new_mutex!(Vec::new()))?;
 
-        if let Err(e) = slot.compare_exchange(
-            core::ptr::null_mut(),
-            // SAFETY: We never move out of this Box
-            Box::into_raw(unsafe { Pin::into_inner_unchecked(new_element) }),
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
+        // SAFETY: We never move out of this Box
+        let raw = Box::into_raw(unsafe { Pin::into_inner_unchecked(new_element) });
+
+        if slot
+            .compare_exchange(
+                core::ptr::null_mut(),
+                raw,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
             // SAFETY: We just got this pointer from `into_raw()`
-            unsafe { Box::from_raw(e) };
+            unsafe { Box::from_raw(raw) };
         }
 
         ptr = slot.load(Ordering::Relaxed);
