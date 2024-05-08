@@ -144,6 +144,7 @@ pub struct IdArrayIds<T: RawDeviceId, const N: usize> {
     sentinel: T::RawType,
 }
 
+// SAFETY: All ID types used in the kernel crate are inherently Sync
 unsafe impl<T: RawDeviceId, const N: usize> Sync for IdArrayIds<T, N> {}
 
 /// A zero-terminated device id array, followed by context data.
