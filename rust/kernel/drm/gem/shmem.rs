@@ -85,6 +85,7 @@ unsafe extern "C" fn gem_create_object<T: DriverObject>(
     dev: *mut bindings::drm_device,
     size: usize,
 ) -> *mut bindings::drm_gem_object {
+    // SAFETY: krealloc is always safe to call like this
     let p = unsafe {
         bindings::krealloc(core::ptr::null(), Object::<T>::SIZE, bindings::GFP_KERNEL)
             as *mut Object<T>
@@ -236,7 +237,8 @@ impl<T: DriverObject> Object<T> {
     ///
     /// Should be called before any mappings are made.
     pub fn set_wc(&mut self, map_wc: bool) {
-        unsafe { (*self.mut_shmem()).set_map_wc(map_wc) };
+        // SAFETY: mut_shmem always returns a valid pointer
+        (unsafe { *self.mut_shmem() }).set_map_wc(map_wc);
     }
 
     /// Share the dma_resv object from another GEM object.
@@ -358,6 +360,7 @@ impl<T: DriverObject> Drop for VMap<T> {
 
 /// SAFETY: `iosys_map` objects are safe to send across threads.
 unsafe impl<T: DriverObject> Send for VMap<T> {}
+/// SAFETY: `iosys_map` objects are safe to send across threads.
 unsafe impl<T: DriverObject> Sync for VMap<T> {}
 
 /// A single scatter-gather entry, representing a span of pages in the device's DMA address space.
@@ -369,11 +372,13 @@ pub struct SGEntry(bindings::scatterlist);
 impl SGEntry {
     /// Returns the starting DMA address of this span
     pub fn dma_address(&self) -> usize {
+        // SAFETY: Always safe to call on scatterlist objects
         (unsafe { bindings::sg_dma_address(&self.0) }) as usize
     }
 
     /// Returns the length of this span in bytes
     pub fn dma_len(&self) -> usize {
+        // SAFETY: Always safe to call on scatterlist objects
         (unsafe { bindings::sg_dma_len(&self.0) }) as usize
     }
 }
@@ -392,7 +397,9 @@ impl<T: DriverObject> SGTable<T> {
     /// Returns an iterator through the SGTable's entries
     pub fn iter(&'_ self) -> SGTableIter<'_> {
         SGTableIter {
+            // SAFETY: sgt is always a valid pointer
             left: unsafe { (*self.sgt).nents } as usize,
+            // SAFETY: sgt is always a valid pointer
             sg: unsafe { (*self.sgt).sgl },
             _p: PhantomData,
         }
@@ -410,6 +417,7 @@ impl<'a, T: DriverObject> IntoIterator for &'a SGTable<T> {
 
 /// SAFETY: `sg_table` objects are safe to send across threads.
 unsafe impl<T: DriverObject> Send for SGTable<T> {}
+/// SAFETY: `sg_table` objects are safe to send across threads.
 unsafe impl<T: DriverObject> Sync for SGTable<T> {}
 
 /// An iterator through `SGTable` entries.
@@ -430,8 +438,10 @@ impl<'a> Iterator for SGTableIter<'a> {
             None
         } else {
             let sg = self.sg;
+            // SAFETY: `self.sg` is always a valid pointer
             self.sg = unsafe { bindings::sg_next(self.sg) };
             self.left -= 1;
+            // SAFETY: `self.sg` is always a valid pointer
             Some(unsafe { &(*(sg as *const SGEntry)) })
         }
     }
