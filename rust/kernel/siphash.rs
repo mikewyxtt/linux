@@ -34,6 +34,7 @@ impl Hasher for SipHasher {
             key: [self.state, 0],
         };
 
+        // SAFETY: Safe to call on a valid slice
         self.state = unsafe { bindings::siphash(bytes.as_ptr() as *const _, bytes.len(), &key) };
     }
 }
