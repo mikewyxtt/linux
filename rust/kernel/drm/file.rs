@@ -2,7 +2,7 @@
 
 //! DRM File objects.
 //!
-//! C header: [`include/linux/drm/drm_file.h`](../../../../include/linux/drm/drm_file.h)
+//! C header: [`include/drm/drm_file.h`](../../../../include/drm/drm_file.h)
 
 use crate::{bindings, drm, error::Result};
 use alloc::boxed::Box;
