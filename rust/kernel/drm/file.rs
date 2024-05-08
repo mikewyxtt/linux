@@ -32,6 +32,7 @@ pub(super) unsafe extern "C" fn open_callback<T: DriverFile>(
     raw_dev: *mut bindings::drm_device,
     raw_file: *mut bindings::drm_file,
 ) -> core::ffi::c_int {
+    // SAFETY: The raw_drm arg is always a valid borrowed reference
     let drm = unsafe { drm::device::Device::borrow(raw_dev) };
     // SAFETY: This reference won't escape this function
     let file = unsafe { &mut *raw_file };
