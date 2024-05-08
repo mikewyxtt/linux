@@ -233,8 +233,8 @@ impl Node {
         #[cfg(not(CONFIG_OF))]
         let ret = 0;
         #[cfg(CONFIG_OF)]
-        // SAFETY: `raw_node` is valid per the type invariant.
         let ret =
+            // SAFETY: `raw_node` is valid per the type invariant.
             unsafe { bindings::of_device_is_compatible(self.raw_node, compatible.as_char_ptr()) };
 
         NonZeroU32::new(ret.try_into().ok()?)
@@ -561,6 +561,7 @@ pub fn find_node_by_phandle(handle: PHandle) -> Option<Node> {
         None
     }
     #[cfg(CONFIG_OF)]
+    // SAFETY: bindings::of_find_node_by_phandle always returns a valid pointer or NULL
     unsafe {
         #[allow(dead_code)]
         Node::from_raw(bindings::of_find_node_by_phandle(handle))
