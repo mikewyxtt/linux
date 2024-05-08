@@ -56,6 +56,7 @@ pub unsafe trait RawDevice {
     fn of_node(&self) -> Option<of::Node> {
         let ptr = self.raw_device();
 
+        // SAFETY: This is safe as long as of_node is NULL or valid.
         unsafe { of::Node::get_from_raw((*ptr).of_node) }
     }
 
