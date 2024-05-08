@@ -2,7 +2,7 @@
 
 //! DRM Sync Objects
 //!
-//! C header: [`include/linux/drm/drm_syncobj.h`](../../../../include/linux/drm/drm_syncobj.h)
+//! C header: [`include/drm/drm_syncobj.h`](../../../../include/drm/drm_syncobj.h)
 
 use crate::{bindings, dma_fence::*, drm, error::Result, prelude::*};
 
