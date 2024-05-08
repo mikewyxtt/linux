@@ -512,6 +512,7 @@ pub fn root() -> Option<Node> {
         None
     }
     #[cfg(CONFIG_OF)]
+    // SAFETY: bindings::of_root is always valid or NULL
     unsafe {
         Node::get_from_raw(bindings::of_root)
     }
@@ -524,6 +525,7 @@ pub fn chosen() -> Option<Node> {
         None
     }
     #[cfg(CONFIG_OF)]
+    // SAFETY: bindings::of_chosen is always valid or NULL
     unsafe {
         Node::get_from_raw(bindings::of_chosen)
     }
@@ -536,6 +538,7 @@ pub fn aliases() -> Option<Node> {
         None
     }
     #[cfg(CONFIG_OF)]
+    // SAFETY: bindings::of_aliases is always valid or NULL
     unsafe {
         Node::get_from_raw(bindings::of_aliases)
     }
@@ -548,6 +551,7 @@ pub fn stdout() -> Option<Node> {
         None
     }
     #[cfg(CONFIG_OF)]
+    // SAFETY: bindings::of_stdout is always valid or NULL
     unsafe {
         Node::get_from_raw(bindings::of_stdout)
     }
