@@ -49,6 +49,7 @@ pub struct NodeData<A: AllocInner<T>, T> {
 
 // SAFETY: Allocator ops take the mutex, and there are no mutable actions on the node.
 unsafe impl<A: Send + AllocInner<T>, T: Send> Send for NodeData<A, T> {}
+// SAFETY: Allocator ops take the mutex, and there are no mutable actions on the node.
 unsafe impl<A: Send + AllocInner<T>, T: Sync> Sync for NodeData<A, T> {}
 
 /// Available MM node insertion modes
@@ -168,9 +169,9 @@ impl<A: AllocInner<T>, T> Allocator<A, T> {
         // SAFETY: We call `Mutex::init_lock` below.
         let mm = UniqueArc::pin_init(Mutex::new(MmInner(Opaque::uninit(), inner, PhantomData)))?;
 
+        // SAFETY: The Opaque instance provides a valid pointer, and it is initialized after
+        // this call.
         unsafe {
-            // SAFETY: The Opaque instance provides a valid pointer, and it is initialized after
-            // this call.
             bindings::drm_mm_init(mm.lock().0.get(), start, size);
         }
 
@@ -295,5 +296,5 @@ impl<A: AllocInner<T>, T> Drop for MmInner<A, T> {
     }
 }
 
-// MmInner is safely Send if the AllocInner user type is Send.
+// SAFETY: MmInner is safely Send if the AllocInner user type is Send.
 unsafe impl<A: Send + AllocInner<T>, T> Send for MmInner<A, T> {}
