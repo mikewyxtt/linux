@@ -29,6 +29,7 @@ impl SyncObj {
 
     /// Returns the DMA fence associated with this sync object, if any.
     pub fn fence_get(&self) -> Option<Fence> {
+        // SAFETY: self.ptr is always valid
         let fence = unsafe { bindings::drm_syncobj_fence_get(self.ptr) };
         if fence.is_null() {
             None
@@ -41,6 +42,7 @@ impl SyncObj {
 
     /// Replaces the DMA fence with a new one, or removes it if fence is None.
     pub fn replace_fence(&self, fence: Option<&Fence>) {
+        // SAFETY: All arguments should be valid per the respective type invariants.
         unsafe {
             bindings::drm_syncobj_replace_fence(
                 self.ptr,
@@ -74,4 +76,5 @@ impl Clone for SyncObj {
 
 // SAFETY: drm_syncobj operations are internally locked.
 unsafe impl Sync for SyncObj {}
+// SAFETY: drm_syncobj operations are internally locked.
 unsafe impl Send for SyncObj {}
