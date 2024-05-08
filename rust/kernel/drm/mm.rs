@@ -2,7 +2,7 @@
 
 //! DRM MM range allocator
 //!
-//! C header: [`include/linux/drm/drm_mm.h`](../../../../include/linux/drm/drm_mm.h)
+//! C header: [`include/drm/drm_mm.h`](../../../../include/drm/drm_mm.h)
 
 use crate::{
     bindings,
