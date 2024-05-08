@@ -2,7 +2,7 @@
 
 //! DRM device.
 //!
-//! C header: [`include/linux/drm/drm_device.h`](../../../../include/linux/drm/drm_device.h)
+//! C header: [`include/drm/drm_device.h`](../../../../include/drm/drm_device.h)
 
 use crate::{
     bindings, device, drm,
