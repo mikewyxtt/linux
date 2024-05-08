@@ -241,10 +241,11 @@ impl<T: Driver> Registration<T> {
     /// It is allowed to move.
     pub fn new(parent: &dyn device::RawDevice) -> Result<Self> {
         let vtable = Pin::new(Box::try_new(Self::VTABLE)?);
+        // SAFETY: Safe to call at any time (with valid args)
         let raw_drm = unsafe { bindings::drm_dev_alloc(&*vtable, parent.raw_device()) };
         let raw_drm = NonNull::new(from_err_ptr(raw_drm)? as *mut _).ok_or(ENOMEM)?;
 
-        // The reference count is one, and now we take ownership of that reference as a
+        // SAFETY: The reference count is one, and now we take ownership of that reference as a
         // drm::device::Device.
         let drm = unsafe { ARef::from_raw(raw_drm) };
 
@@ -306,10 +307,10 @@ impl<T: Driver> Registration<T> {
 // or CPUs, so it is safe to share it.
 unsafe impl<T: Driver> Sync for Registration<T> {}
 
+#[allow(clippy::non_send_fields_in_send_ty)]
 // SAFETY: Registration with and unregistration from the drm subsystem can happen from any thread.
 // Additionally, `T::Data` (which is dropped during unregistration) is `Send`, so it is ok to move
 // `Registration` to different threads.
-#[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl<T: Driver> Send for Registration<T> {}
 
 impl<T: Driver> Drop for Registration<T> {

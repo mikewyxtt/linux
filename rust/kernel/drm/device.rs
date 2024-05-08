@@ -22,12 +22,14 @@ pub struct Device<T: drm::drv::Driver> {
 impl<T: drm::drv::Driver> Device<T> {
     #[allow(dead_code, clippy::mut_from_ref)]
     pub(crate) unsafe fn raw_mut(&self) -> &mut bindings::drm_device {
+        // SAFETY: Depends on safe usage by the caller
         unsafe { &mut *self.drm.get() }
     }
 
     // Not intended to be called externally, except via declare_drm_ioctls!()
     #[doc(hidden)]
     pub unsafe fn borrow<'a>(raw: *const bindings::drm_device) -> &'a Self {
+        // SAFETY: Hidden helper, depends on safe usage by the caller
         unsafe { &*(raw as *const Self) }
     }
 
@@ -43,6 +45,7 @@ impl<T: drm::drv::Driver> Device<T> {
 // satisfy the requirements.
 unsafe impl<T: drm::drv::Driver> AlwaysRefCounted for Device<T> {
     fn inc_ref(&self) {
+        // SAFETY: We already have a reference per the contract.
         unsafe { bindings::drm_dev_get(&self.drm as *const _ as *mut _) };
     }
 
@@ -61,6 +64,7 @@ unsafe impl<T: drm::drv::Driver> Send for Device<T> {}
 unsafe impl<T: drm::drv::Driver> Sync for Device<T> {}
 
 // Make drm::Device work for dev_info!() and friends
+// SAFETY: dev is initialized by C for all Device objects
 unsafe impl<T: drm::drv::Driver> device::RawDevice for Device<T> {
     fn raw_device(&self) -> *mut bindings::device {
         // SAFETY: dev is initialized by C for all Device objects
