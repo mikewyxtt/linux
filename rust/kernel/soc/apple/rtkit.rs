@@ -92,6 +92,7 @@ pub struct RtKit<T: Operations> {
 }
 
 unsafe extern "C" fn crashed_callback<T: Operations>(cookie: *mut core::ffi::c_void) {
+    // SAFETY: cookie is always a T::Data in this API
     T::crashed(unsafe { T::Data::borrow(cookie) });
 }
 
@@ -100,6 +101,7 @@ unsafe extern "C" fn recv_message_callback<T: Operations>(
     endpoint: u8,
     message: u64,
 ) {
+    // SAFETY: cookie is always a T::Data in this API
     T::recv_message(unsafe { T::Data::borrow(cookie) }, endpoint, message);
 }
 
@@ -108,6 +110,7 @@ unsafe extern "C" fn recv_message_early_callback<T: Operations>(
     endpoint: u8,
     message: u64,
 ) -> bool {
+    // SAFETY: cookie is always a T::Data in this API
     T::recv_message_early(unsafe { T::Data::borrow(cookie) }, endpoint, message)
 }
 
@@ -155,9 +158,10 @@ unsafe extern "C" fn shmem_destroy_callback<T: Operations>(
     _cookie: *mut core::ffi::c_void,
     bfr: *mut bindings::apple_rtkit_shmem,
 ) {
+    // SAFETY: `bfr` is a valid buffer
     let bfr_mut = unsafe { &mut *bfr };
-    // SAFETY: Per shmem_setup_callback, this has to be a pointer to a Buffer if it is set.
     if !bfr_mut.private.is_null() {
+        // SAFETY: Per shmem_setup_callback, this has to be a pointer to a Buffer if it is set.
         unsafe {
             core::mem::drop(Box::from_raw(bfr_mut.private as *mut T::Buffer));
         }
