@@ -198,6 +198,7 @@ pub trait BaseObject: IntoGEMObject {
             // TODO: is this threadsafe?
             bindings::drm_gem_create_mmap_offset(self.gem_obj() as *const _ as *mut _)
         })?;
+        // SAFETY: Safe to call on vma_node (which is guaranteed to be valid after the above)
         Ok(unsafe {
             bindings::drm_vma_node_offset_addr(&self.gem_obj().vma_node as *const _ as *mut _)
         })
@@ -256,6 +257,7 @@ impl<T: DriverObject> Object<T> {
             _p: PhantomPinned
         }))?;
 
+        // SAFETY: Safe to call as long as the pointer is a properly allocated GEM object
         to_result(unsafe {
             bindings::drm_gem_object_init(dev.raw_mut(), &obj.obj as *const _ as *mut _, size)
         })?;
@@ -316,6 +318,7 @@ pub struct ObjectRef<T: IntoGEMObject> {
 
 /// SAFETY: GEM object references are safe to share between threads.
 unsafe impl<T: IntoGEMObject> Send for ObjectRef<T> {}
+/// SAFETY: GEM object references are safe to share between threads.
 unsafe impl<T: IntoGEMObject> Sync for ObjectRef<T> {}
 
 impl<T: IntoGEMObject> Clone for ObjectRef<T> {
