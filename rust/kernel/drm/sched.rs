@@ -2,7 +2,7 @@
 
 //! DRM Scheduler
 //!
-//! C header: [`include/linux/drm/gpu_scheduler.h`](../../../../include/linux/drm/gpu_scheduler.h)
+//! C header: [`include/drm/gpu_scheduler.h`](../../../../include/drm/gpu_scheduler.h)
 
 use crate::{
     bindings, device,
