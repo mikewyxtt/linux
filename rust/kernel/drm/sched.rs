@@ -65,6 +65,7 @@ unsafe extern "C" fn prepare_job_cb<T: JobImpl>(
     // SAFETY: All of our jobs are Job<T>.
     let p = unsafe { crate::container_of!(sched_job, Job<T>, job) as *mut Job<T> };
 
+    // SAFETY: All of our jobs are Job<T>.
     match T::prepare(unsafe { &mut *p }) {
         None => core::ptr::null_mut(),
         Some(fence) => fence.into_raw(),
@@ -77,6 +78,7 @@ unsafe extern "C" fn run_job_cb<T: JobImpl>(
     // SAFETY: All of our jobs are Job<T>.
     let p = unsafe { crate::container_of!(sched_job, Job<T>, job) as *mut Job<T> };
 
+    // SAFETY: All of our jobs are Job<T>.
     match T::run(unsafe { &mut *p }) {
         Err(e) => e.to_ptr(),
         Ok(None) => core::ptr::null_mut(),
@@ -90,6 +92,7 @@ unsafe extern "C" fn timedout_job_cb<T: JobImpl>(
     // SAFETY: All of our jobs are Job<T>.
     let p = unsafe { crate::container_of!(sched_job, Job<T>, job) as *mut Job<T> };
 
+    // SAFETY: All of our jobs are Job<T>.
     T::timed_out(unsafe { &mut *p }) as bindings::drm_gpu_sched_stat
 }
 
@@ -136,6 +139,7 @@ pub struct PendingJob<'a, T: JobImpl>(Box<Job<T>>, PhantomData<&'a T>);
 impl<'a, T: JobImpl> PendingJob<'a, T> {
     /// Add a fence as a dependency to the job
     pub fn add_dependency(&mut self, fence: Fence) -> Result {
+        // SAFETY: C call with correct arguments
         to_result(unsafe {
             bindings::drm_sched_job_add_dependency(&mut self.0.job, fence.into_raw())
         })
@@ -143,6 +147,7 @@ impl<'a, T: JobImpl> PendingJob<'a, T> {
 
     /// Arm the job to make it ready for execution
     pub fn arm(mut self) -> ArmedJob<'a, T> {
+        // SAFETY: C call with correct arguments
         unsafe { bindings::drm_sched_job_arm(&mut self.0.job) };
         ArmedJob(self.0, PhantomData)
     }
@@ -168,6 +173,7 @@ pub struct ArmedJob<'a, T: JobImpl>(Box<Job<T>>, PhantomData<&'a T>);
 impl<'a, T: JobImpl> ArmedJob<'a, T> {
     /// Returns the job fences
     pub fn fences(&self) -> JobFences<'_> {
+        // SAFETY: s_fence is always a valid drm_sched_fence pointer
         JobFences(unsafe { &mut *self.0.job.s_fence })
     }
 
@@ -202,11 +208,13 @@ pub struct JobFences<'a>(&'a mut bindings::drm_sched_fence);
 impl<'a> JobFences<'a> {
     /// Returns a new reference to the job scheduled fence.
     pub fn scheduled(&mut self) -> Fence {
+        // SAFETY: self.0.scheduled is always a valid fence
         unsafe { Fence::get_raw(&mut self.0.scheduled) }
     }
 
     /// Returns a new reference to the job finished fence.
     pub fn finished(&mut self) -> Fence {
+        // SAFETY: self.0.finished is always a valid fence
         unsafe { Fence::get_raw(&mut self.0.finished) }
     }
 }
@@ -228,6 +236,7 @@ impl<T: JobImpl> Drop for EntityInner<T> {
 
 // SAFETY: TODO
 unsafe impl<T: JobImpl> Sync for EntityInner<T> {}
+// SAFETY: TODO
 unsafe impl<T: JobImpl> Send for EntityInner<T> {}
 
 /// A DRM scheduler entity.
@@ -300,6 +309,7 @@ impl<T: JobImpl> Drop for SchedulerInner<T> {
 
 // SAFETY: TODO
 unsafe impl<T: JobImpl> Sync for SchedulerInner<T> {}
+// SAFETY: TODO
 unsafe impl<T: JobImpl> Send for SchedulerInner<T> {}
 
 /// A DRM Scheduler
