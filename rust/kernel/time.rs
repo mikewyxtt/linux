@@ -116,6 +116,7 @@ pub mod clock {
     impl Monotonic for KernelTime {}
     impl Now for KernelTime {
         fn now() -> Instant<Self> {
+            // SAFETY: Always safe to call
             Instant::<Self>::new(unsafe { bindings::ktime_get() })
         }
     }
@@ -134,6 +135,7 @@ pub mod clock {
     impl Monotonic for BootTime {}
     impl Now for BootTime {
         fn now() -> Instant<Self> {
+            // SAFETY: Always safe to call
             Instant::<Self>::new(unsafe { bindings::ktime_get_boottime() })
         }
     }
@@ -148,6 +150,7 @@ pub mod clock {
     impl WallTime for TaiTime {}
     impl Now for TaiTime {
         fn now() -> Instant<Self> {
+            // SAFETY: Always safe to call
             Instant::<Self>::new(unsafe { bindings::ktime_get_clocktai() })
         }
     }
@@ -161,6 +164,7 @@ pub mod clock {
     impl WallTime for RealTime {}
     impl Now for RealTime {
         fn now() -> Instant<Self> {
+            // SAFETY: Always safe to call
             Instant::<Self>::new(unsafe { bindings::ktime_get_real() })
         }
     }
