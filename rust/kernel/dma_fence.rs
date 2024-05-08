@@ -62,11 +62,13 @@ pub trait RawDmaFence: crate::private::Sealed {
 
     /// Signal completion of this fence
     fn signal(&self) -> Result {
+        // SAFETY: Safe to call on any valid dma_fence object
         to_result(unsafe { bindings::dma_fence_signal(self.raw()) })
     }
 
     /// Set the error flag on this fence
     fn set_error(&self, err: Error) {
+        // SAFETY: Safe to call on any valid dma_fence object
         unsafe { bindings::dma_fence_set_error(self.raw(), err.to_errno()) };
     }
 }
@@ -130,7 +132,9 @@ impl Clone for Fence {
     }
 }
 
+// SAFETY: The API for these objects is thread safe
 unsafe impl Sync for Fence {}
+// SAFETY: The API for these objects is thread safe
 unsafe impl Send for Fence {}
 
 /// Trait which must be implemented by driver-specific fence objects.
@@ -343,12 +347,14 @@ impl<T: FenceOps> Deref for UniqueFence<T> {
     type Target = FenceObject<T>;
 
     fn deref(&self) -> &FenceObject<T> {
+        // SAFETY: The pointer is always valid for UniqueFence objects
         unsafe { &*self.0 }
     }
 }
 
 impl<T: FenceOps> DerefMut for UniqueFence<T> {
     fn deref_mut(&mut self) -> &mut FenceObject<T> {
+        // SAFETY: The pointer is always valid for UniqueFence objects
         unsafe { &mut *self.0 }
     }
 }
@@ -356,6 +362,7 @@ impl<T: FenceOps> DerefMut for UniqueFence<T> {
 impl<T: FenceOps> crate::private::Sealed for UniqueFence<T> {}
 impl<T: FenceOps> RawDmaFence for UniqueFence<T> {
     fn raw(&self) -> *mut bindings::dma_fence {
+        // SAFETY: The pointer is always valid for UniqueFence objects
         unsafe { addr_of_mut!((*self.0).fence) }
     }
 }
@@ -376,7 +383,9 @@ impl<T: FenceOps> Drop for UniqueFence<T> {
     }
 }
 
+// SAFETY: The API for these objects is thread safe
 unsafe impl<T: FenceOps> Sync for UniqueFence<T> {}
+// SAFETY: The API for these objects is thread safe
 unsafe impl<T: FenceOps> Send for UniqueFence<T> {}
 
 /// A shared reference to a driver-specific fence object
@@ -386,6 +395,7 @@ impl<T: FenceOps> Deref for UserFence<T> {
     type Target = FenceObject<T>;
 
     fn deref(&self) -> &FenceObject<T> {
+        // SAFETY: The pointer is always valid for UserFence objects
         unsafe { &*self.0 }
     }
 }
@@ -403,6 +413,7 @@ impl<T: FenceOps> Clone for UserFence<T> {
 impl<T: FenceOps> crate::private::Sealed for UserFence<T> {}
 impl<T: FenceOps> RawDmaFence for UserFence<T> {
     fn raw(&self) -> *mut bindings::dma_fence {
+        // SAFETY: The pointer is always valid for UserFence objects
         unsafe { addr_of_mut!((*self.0).fence) }
     }
 }
@@ -414,7 +425,9 @@ impl<T: FenceOps> Drop for UserFence<T> {
     }
 }
 
+// SAFETY: The API for these objects is thread safe
 unsafe impl<T: FenceOps> Sync for UserFence<T> {}
+// SAFETY: The API for these objects is thread safe
 unsafe impl<T: FenceOps> Send for UserFence<T> {}
 
 /// An array of fence contexts, out of which fences can be created.
@@ -437,6 +450,7 @@ impl FenceContexts {
             seqnos.try_push(Default::default())?;
         }
 
+        // SAFETY: This is always safe to call
         let start = unsafe { bindings::dma_fence_context_alloc(count as core::ffi::c_uint) };
 
         Ok(FenceContexts {
@@ -454,6 +468,7 @@ impl FenceContexts {
             return Err(EINVAL);
         }
 
+        // SAFETY: krealloc is always safe to call like this
         let p = unsafe {
             bindings::krealloc(
                 core::ptr::null_mut(),
