@@ -57,6 +57,7 @@ pub(super) unsafe extern "C" fn postclose_callback<T: DriverFile>(
     let file = unsafe { &*raw_file };
 
     // Drop the DriverFile
+    // SAFETY: file.driver_priv is always a Box<T> pointer
     unsafe { drop(Box::from_raw(file.driver_priv as *mut T)) };
 }
 
@@ -78,11 +79,14 @@ impl<T: DriverFile> File<T> {
 
     /// Return an immutable reference to the raw `drm_file` structure.
     pub(super) fn file(&self) -> &bindings::drm_file {
+        // SAFETY: The raw pointer is always valid per usage in declare_drm_ioctls!()
         unsafe { &*self.raw }
     }
 
     /// Return a pinned reference to the driver file structure.
     pub fn inner(&self) -> Pin<&T> {
+        // SAFETY: The driver_priv pointer is always a pinned reference to the driver
+        // file structure.
         unsafe { Pin::new_unchecked(&*(self.file().driver_priv as *const T)) }
     }
 }
@@ -101,6 +105,7 @@ pub unsafe trait GenericFile: crate::private::Sealed {
     fn raw_mut(&mut self) -> *mut bindings::drm_file;
 }
 
+// SAFETY: Follows the invariants of the File<T>.
 unsafe impl<T: DriverFile> GenericFile for File<T> {
     fn raw(&self) -> *const bindings::drm_file {
         self.raw
