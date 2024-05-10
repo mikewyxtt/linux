@@ -353,11 +353,11 @@ impl<T: ?Sized> Drop for Arc<T> {
         // freed/invalid memory as long as it is never dereferenced.
         let refcount = unsafe { self.ptr.as_ref() }.refcount.get();
 
+        #[cfg(CONFIG_RUST_EXTRA_LOCKDEP)]
         // SAFETY: By the type invariant, there is necessarily a reference to the object.
         // We cannot hold the map lock across the reference decrement, as we might race
         // another thread. Therefore, we lock and immediately drop the guard here. This
         // only serves to inform lockdep of the dependency up the call stack.
-        #[cfg(CONFIG_RUST_EXTRA_LOCKDEP)]
         unsafe { self.ptr.as_ref() }.lockdep_map.lock();
 
         // INVARIANT: If the refcount reaches zero, there are no other instances of `Arc`, and
@@ -368,11 +368,11 @@ impl<T: ?Sized> Drop for Arc<T> {
         if is_zero {
             // The count reached zero, we must free the memory.
 
+            #[cfg(CONFIG_RUST_EXTRA_LOCKDEP)]
             // SAFETY: If we get this far, we had the last reference to the object.
             // That means we are responsible for freeing it, so we can safely lock
             // the fake lock again. This wraps dropping the inner object, which
             // informs lockdep of the dependencies down the call stack.
-            #[cfg(CONFIG_RUST_EXTRA_LOCKDEP)]
             let guard = unsafe { self.ptr.as_ref() }.lockdep_map.lock();
 
             // SAFETY: The pointer was initialised from the result of `Box::leak`,
@@ -383,9 +383,9 @@ impl<T: ?Sized> Drop for Arc<T> {
             #[cfg(CONFIG_RUST_EXTRA_LOCKDEP)]
             core::mem::drop(guard);
 
+            #[cfg(CONFIG_RUST_EXTRA_LOCKDEP)]
             // SAFETY: The pointer was initialised from the result of `Box::leak`,
             // and the lockdep map is valid.
-            #[cfg(CONFIG_RUST_EXTRA_LOCKDEP)]
             unsafe {
                 core::ptr::drop_in_place(&mut self.ptr.as_mut().lockdep_map)
             };
