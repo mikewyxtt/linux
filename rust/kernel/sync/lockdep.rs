@@ -205,6 +205,7 @@ impl LockdepMap {
         let map = Opaque::uninit();
         let (key, name) = caller_lock_class();
 
+        // SAFETY: Just calling the C API
         unsafe {
             bindings::lockdep_init_map_type(
                 map.get(),
@@ -222,6 +223,7 @@ impl LockdepMap {
 
     #[inline(always)]
     pub(crate) fn lock(&self) -> LockdepGuard<'_> {
+        // SAFETY: Just calling the C API
         unsafe { bindings::lock_acquire_ret(self.0.get(), 0, 0, 1, 1, core::ptr::null_mut()) };
 
         LockdepGuard(self)
@@ -231,6 +233,7 @@ impl LockdepMap {
 impl<'a> Drop for LockdepGuard<'a> {
     #[inline(always)]
     fn drop(&mut self) {
+        // SAFETY: Just calling the C API
         unsafe { bindings::lock_release_ret(self.0 .0.get()) };
     }
 }
