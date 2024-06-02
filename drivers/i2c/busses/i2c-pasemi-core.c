@@ -15,6 +15,7 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 
 #include "i2c-pasemi-core.h"
 
@@ -51,6 +52,8 @@
 #define CTL_MTR		BIT(9)
 #define CTL_UJM		BIT(8)
 #define CTL_CLK_M	GENMASK(7, 0)
+
+#define TRANSFER_TIMEOUT_MS	100
 
 static inline void reg_write(struct pasemi_smbus *smbus, int reg, int val)
 {
@@ -90,28 +93,28 @@ static void pasemi_smb_clear(struct pasemi_smbus *smbus)
 
 static int pasemi_smb_waitready(struct pasemi_smbus *smbus)
 {
-	int timeout = 100;
+	int ret;
 	unsigned int status;
 
 	if (smbus->use_irq) {
 		reinit_completion(&smbus->irq_completion);
 		reg_write(smbus, REG_IMASK, SMSTA_XEN | SMSTA_MTN);
-		wait_for_completion_timeout(&smbus->irq_completion, msecs_to_jiffies(100));
+		ret = wait_for_completion_timeout(&smbus->irq_completion, msecs_to_jiffies(TRANSFER_TIMEOUT_MS));
+		if (ret == 0)
+			ret = -ETIMEDOUT;
 		reg_write(smbus, REG_IMASK, 0);
 		status = reg_read(smbus, REG_SMSTA);
 	} else {
-		status = reg_read(smbus, REG_SMSTA);
-		while (!(status & SMSTA_XEN) && timeout--) {
-			msleep(1);
-			status = reg_read(smbus, REG_SMSTA);
-		}
+		ret = read_poll_timeout(reg_read, status, (status & (SMSTA_XEN)),
+				        USEC_PER_MSEC, USEC_PER_MSEC*TRANSFER_TIMEOUT_MS, true,
+				        smbus, REG_SMSTA);
 	}
 
 	/* Got NACK? */
 	if (status & SMSTA_MTN)
 		return -ENXIO;
 
-	if (timeout < 0) {
+	if (ret < 0) {
 		dev_warn(smbus->dev, "Timeout, status 0x%08x\n", status);
 		reg_write(smbus, REG_SMSTA, status);
 		return -ETIME;
