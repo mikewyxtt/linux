@@ -56,7 +56,11 @@ pub trait IntoGEMObject: Sized + crate::private::Sealed {
     fn mut_gem_obj(&mut self) -> &mut bindings::drm_gem_object;
 
     /// Converts a pointer to a `drm_gem_object` into a pointer to this type.
-    fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Self;
+    ///
+    /// # Safety
+    ///
+    /// The argument must an object owned by this Driver.
+    unsafe fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Self;
 }
 
 /// Trait which must be implemented by drivers using base GEM objects.
@@ -82,14 +86,16 @@ unsafe extern "C" fn open_callback<T: BaseDriverObject<U>, U: BaseObject>(
     raw_obj: *mut bindings::drm_gem_object,
     raw_file: *mut bindings::drm_file,
 ) -> core::ffi::c_int {
-    // SAFETY: The pointer we got has to be valid.
+    // SAFETY: The file pointer is valid when called from the C side.
     let file = unsafe {
         file::File::<<<U as IntoGEMObject>::Driver as drv::Driver>::File>::from_raw(raw_file)
     };
-    let obj =
+    // SAFETY: The object pointer is valid and owned by us when called from the C side.
+    let obj = unsafe {
         <<<U as IntoGEMObject>::Driver as drv::Driver>::Object as IntoGEMObject>::from_gem_obj(
             raw_obj,
-        );
+        )
+    };
 
     // SAFETY: from_gem_obj() returns a valid pointer as long as the type is
     // correct and the raw_obj we got is valid.
@@ -107,10 +113,12 @@ unsafe extern "C" fn close_callback<T: BaseDriverObject<U>, U: BaseObject>(
     let file = unsafe {
         file::File::<<<U as IntoGEMObject>::Driver as drv::Driver>::File>::from_raw(raw_file)
     };
-    let obj =
+    // SAFETY: The object pointer is valid and owned by us when called from the C side.
+    let obj = unsafe {
         <<<U as IntoGEMObject>::Driver as drv::Driver>::Object as IntoGEMObject>::from_gem_obj(
             raw_obj,
-        );
+        )
+    };
 
     // SAFETY: from_gem_obj() returns a valid pointer as long as the type is
     // correct and the raw_obj we got is valid.
@@ -128,7 +136,8 @@ impl<T: DriverObject> IntoGEMObject for Object<T> {
         &mut self.obj
     }
 
-    fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Object<T> {
+    unsafe fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Object<T> {
+        // SAFETY: Safe as long as the safety invariants of this trait method hold.
         unsafe { crate::container_of!(obj, Object<T>, obj) as *mut Object<T> }
     }
 }
