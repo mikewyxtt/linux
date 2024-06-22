@@ -269,7 +269,7 @@ impl File {
         };
 
         for (i, mask) in gpu.get_dyncfg().id.core_masks.iter().enumerate() {
-            *(params.core_masks.get_mut(i).ok_or(EIO)?) = (*mask).try_into()?;
+            *(params.core_masks.get_mut(i).ok_or(EIO)?) = (*mask).into();
         }
 
         for i in 0..3 {
