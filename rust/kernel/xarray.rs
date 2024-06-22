@@ -107,6 +107,9 @@ pub struct XArray<T: ForeignOwnable> {
 }
 
 impl<T: ForeignOwnable> XArray<T> {
+    /// The maximum supported index
+    pub const MAX: usize = core::ffi::c_ulong::MAX as usize;
+
     /// Creates a new `XArray` with the given flags.
     pub fn new(flags: Flags) -> XArray<T> {
         let xa = Opaque::uninit();
@@ -143,6 +146,7 @@ impl<T: ForeignOwnable> XArray<T> {
             )
         };
 
+        // SAFETY: `xa_err` is safe to call on any pointer
         let ret = unsafe { bindings::xa_err(old) };
         if ret != 0 {
             Err(Error::from_errno(ret))
@@ -185,12 +189,44 @@ impl<T: ForeignOwnable> XArray<T> {
         })
     }
 
+    /// Looks up and returns a reference to the lowest entry in the array between index and max,
+    /// returning a tuple of its index and a `Guard` if one exists.
+    ///
+    /// This guard blocks all other actions on the `XArray`. Callers are expected to drop the
+    /// `Guard` eagerly to avoid blocking other users, such as by taking a clone of the value.
+    pub fn find(self: Pin<&Self>, index: usize, max: usize) -> Option<(usize, Guard<'_, T>)> {
+        let mut index: core::ffi::c_ulong = index.try_into().ok()?;
+
+        // SAFETY: `self.xa` is always valid by the type invariant.
+        unsafe { bindings::xa_lock(self.xa.get()) };
+
+        // SAFETY: `self.xa` is always valid by the type invariant.
+        let guard = ScopeGuard::new(|| unsafe { bindings::xa_unlock(self.xa.get()) });
+
+        // SAFETY: `self.xa` is always valid by the type invariant.
+        let p = unsafe {
+            bindings::xa_find(
+                self.xa.get(),
+                &mut index,
+                max.try_into().ok()?,
+                bindings::BINDINGS_XA_PRESENT,
+            )
+        };
+
+        NonNull::new(p as *mut T).map(|p| {
+            guard.dismiss();
+            (index as usize, Guard(p, self))
+        })
+    }
+
     /// Removes and returns an entry, returning it if it existed.
     pub fn remove(self: Pin<&Self>, index: usize) -> Option<T> {
+        // SAFETY: self.xa is always valid and pinned.
         let p = unsafe { bindings::xa_erase(self.xa.get(), index.try_into().ok()?) };
         if p.is_null() {
             None
         } else {
+            // SAFETY: Pointers stored in the xarray are always T types.
             Some(unsafe { T::from_foreign(p) })
         }
     }
@@ -299,4 +335,5 @@ impl<T: ForeignOwnable> Drop for XArray<T> {
 
 // SAFETY: XArray is thread-safe and all mutation operations are internally locked.
 unsafe impl<T: Send + ForeignOwnable> Send for XArray<T> {}
+// SAFETY: XArray is thread-safe and all mutation operations are internally locked.
 unsafe impl<T: Sync + ForeignOwnable> Sync for XArray<T> {}
