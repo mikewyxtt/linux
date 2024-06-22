@@ -124,6 +124,7 @@ unsafe extern "C" fn free_callback<T: DriverObject>(obj: *mut bindings::drm_gem_
         crate::container_of!(obj, bindings::drm_gem_shmem_object, base)
             as *mut bindings::drm_gem_shmem_object
     };
+    // SAFETY: All of our objects are Object<T>.
     let p = unsafe { crate::container_of!(shmem, Object<T>, obj) as *mut Object<T> };
 
     // SAFETY: p is never used after this
@@ -178,8 +179,10 @@ impl<T: DriverObject> Object<T> {
     pub fn new(dev: &device::Device<T::Driver>, size: usize) -> Result<gem::UniqueObjectRef<Self>> {
         // SAFETY: This function can be called as long as the ALLOC_OPS are set properly
         // for this driver, and the gem_create_object is called.
-        let p = unsafe { bindings::drm_gem_shmem_create(dev.raw_mut(), size) };
-        let p = unsafe { crate::container_of!(p, Object<T>, obj) as *mut _ };
+        let p = unsafe {
+            let p = bindings::drm_gem_shmem_create(dev.raw_mut(), size);
+            crate::container_of!(p, Object<T>, obj) as *mut _
+        };
 
         // SAFETY: The gem_create_object callback ensures this is a valid Object<T>,
         // so we can take a unique reference to it.
@@ -288,12 +291,14 @@ impl<T: DriverObject> gem::IntoGEMObject for Object<T> {
         &mut self.obj.base
     }
 
-    fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Object<T> {
-        let shmem = unsafe {
-            crate::container_of!(obj, bindings::drm_gem_shmem_object, base)
-                as *mut bindings::drm_gem_shmem_object
-        };
-        unsafe { crate::container_of!(shmem, Object<T>, obj) as *mut Object<T> }
+    // Safety: the passed GEM object must be owned by this driver (and be a shmem object).
+    unsafe fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Object<T> {
+        // SAFETY: The invariant guarantees this is correct.
+        unsafe {
+            let shmem = crate::container_of!(obj, bindings::drm_gem_shmem_object, base)
+                as *mut bindings::drm_gem_shmem_object;
+            crate::container_of!(shmem, Object<T>, obj) as *mut Object<T>
+        }
     }
 }
 
