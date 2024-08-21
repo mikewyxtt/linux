@@ -805,10 +805,11 @@ static int macsmc_power_probe(struct platform_device *pdev)
 	apple_smc_write_u8(power->smc, SMC_KEY(CH0K), 0);
 	apple_smc_write_u8(power->smc, SMC_KEY(CH0B), 0);
 
-	if (apple_smc_read_u16(power->smc, SMC_KEY(CHLS), &vu16) >= 0) {
-		power->has_chls = true;
-	} else if (apple_smc_read_flag(power->smc, SMC_KEY(CHWA)) >= 0) {
+	/* prefer CHWA as some SMC firmwares have an incompatible CHLS */
+	if (apple_smc_read_flag(power->smc, SMC_KEY(CHWA)) >= 0) {
 		power->has_chwa = true;
+	} else if (apple_smc_read_u16(power->smc, SMC_KEY(CHLS), &vu16) >= 0) {
+		power->has_chls = true;
 	} else {
 		/* Remove the last 2 properties that control the charge threshold */
 		power->batt_desc.num_properties -= 2;
