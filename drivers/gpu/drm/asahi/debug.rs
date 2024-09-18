@@ -55,6 +55,7 @@ pub(crate) enum DebugFlags {
     WaitForPowerOff = 38,
     NoGpuRecovery = 39,
     DisableClustering = 40,
+    DebugClustering = 41,
 
     // 48-: Misc
     Debug0 = 48,

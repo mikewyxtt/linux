@@ -345,9 +345,15 @@ impl Buffer::ver {
             1
         };
 
-        let preempt1_size = num_clusters_adj * gpu.get_cfg().preempt1_size;
-        let preempt2_size = num_clusters_adj * gpu.get_cfg().preempt2_size;
-        let preempt3_size = num_clusters_adj * gpu.get_cfg().preempt3_size;
+        let preempt_mul = if num_clusters > 1 && debug_enabled(debug::DebugFlags::DebugClustering) {
+            8
+        } else {
+            1
+        };
+
+        let preempt1_size = preempt_mul * num_clusters_adj * gpu.get_cfg().preempt1_size;
+        let preempt2_size = preempt_mul * num_clusters_adj * gpu.get_cfg().preempt2_size;
+        let preempt3_size = preempt_mul * num_clusters_adj * gpu.get_cfg().preempt3_size;
 
         let shared = &mut alloc.shared;
         let info = alloc.private.new_init(
@@ -549,6 +555,13 @@ impl Buffer::ver {
         let tilemap_size = tile_info.tilemap_size;
         let tpc_size = tile_info.tpc_size;
 
+        let meta_mul =
+            if inner.num_clusters > 1 && debug_enabled(debug::DebugFlags::DebugClustering) {
+                8
+            } else {
+                1
+            };
+
         // TODO: what is this exactly?
         mod_pr_debug!("Buffer: Allocating TVB buffers\n");
 
@@ -559,7 +572,7 @@ impl Buffer::ver {
         // that to be safe...
         let user_buffer = inner.ualloc.lock().array_empty_tagged(
             if inner.num_clusters > 1 {
-                0x10080
+                0x10080 * meta_mul
             } else {
                 0x80
             },
@@ -569,7 +582,7 @@ impl Buffer::ver {
         let tvb_heapmeta = inner
             .ualloc
             .lock()
-            .array_empty_tagged(0x200 + tile_info.layermeta_size, b"HMTA")?;
+            .array_empty_tagged(0x200 + tile_info.layermeta_size * meta_mul, b"HMTA")?;
         let tvb_tilemap = inner
             .ualloc
             .lock()
@@ -588,11 +601,10 @@ impl Buffer::ver {
                 // priv seems to work and might be faster?
                 // Needs to be FW-writable anyway, so ualloc
                 // won't work.
-                let buf =
-                    Arc::try_new(inner.ualloc_priv.lock().array_empty_tagged(
-                        (tpc_size + mmu::UAT_PGMSK) & !mmu::UAT_PGMSK,
-                        b"TPC ",
-                    )?)?;
+                let buf = Arc::try_new(inner.ualloc_priv.lock().array_empty_tagged(
+                    (meta_mul * tpc_size + mmu::UAT_PGMSK) & !mmu::UAT_PGMSK,
+                    b"TPC ",
+                )?)?;
                 inner.tpc = Some(buf.clone());
                 buf
             }
@@ -606,13 +618,14 @@ impl Buffer::ver {
         let clustering = if inner.num_clusters > 1 {
             let cfg = inner.cfg.clustering.as_ref().unwrap();
 
-            clmeta_size = tile_info.layermeta_size * cfg.max_splits;
+            clmeta_size = meta_mul * tile_info.layermeta_size * cfg.max_splits;
             // Maybe: (4x4 macro tiles + 1 global page)*n, 32bit each (17*4*n)
             // Unused on t602x?
-            meta1_size = align(tile_info.meta1_blocks as usize * cfg.meta1_blocksize, 0x80);
-            meta2_size = align(cfg.meta2_size, 0x80);
-            meta3_size = align(cfg.meta3_size, 0x80);
-            let meta4_size = cfg.meta4_size;
+            meta1_size =
+                meta_mul * align(tile_info.meta1_blocks as usize * cfg.meta1_blocksize, 0x80);
+            meta2_size = meta_mul * align(cfg.meta2_size, 0x80);
+            meta3_size = meta_mul * align(cfg.meta3_size, 0x80);
+            let meta4_size = meta_mul * cfg.meta4_size;
 
             let meta_size = clmeta_size + meta1_size + meta2_size + meta3_size + meta4_size;
 
@@ -620,7 +633,7 @@ impl Buffer::ver {
             let tilemaps = inner
                 .ualloc
                 .lock()
-                .array_empty_tagged(cfg.max_splits * tilemap_size, b"CTMP")?;
+                .array_empty_tagged(meta_mul * cfg.max_splits * tilemap_size, b"CTMP")?;
             let meta = inner.ualloc.lock().array_empty_tagged(meta_size, b"CMTA")?;
             Some(buffer::ClusterBuffers { tilemaps, meta })
         } else {
