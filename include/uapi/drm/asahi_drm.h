@@ -73,6 +73,8 @@ struct drm_asahi_params_global {
 	__u32 result_compute_size;
 
 	__u32 firmware_version[4];
+
+	__u64 vm_timer_addr;
 };
 
 enum drm_asahi_feat_compat {
