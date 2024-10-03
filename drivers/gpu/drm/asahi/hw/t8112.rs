@@ -104,4 +104,5 @@ pub(crate) const HWCONFIG: super::HwConfig = HwConfig {
     ],
     sram_base: None,
     sram_size: None,
+    aic_timebase: Some(0x23b0dc020),
 };

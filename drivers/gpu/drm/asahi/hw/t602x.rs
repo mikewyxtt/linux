@@ -146,6 +146,7 @@ pub(crate) const HWCONFIG_T6022: super::HwConfig = HwConfig {
     io_mappings: &iomaps(0x6022, 8),
     sram_base: Some(0x404d60000),
     sram_size: Some(0x20000),
+    aic_timebase: Some(0x28e148020),
 };
 
 pub(crate) const HWCONFIG_T6021: super::HwConfig = HwConfig {

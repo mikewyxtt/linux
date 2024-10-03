@@ -91,8 +91,10 @@ const PTE_TABLE: u64 = 0x3; // BIT(0) | BIT(1)
 /// Address of a special dummy page?
 //const IOVA_UNK_PAGE: u64 = 0x6f_ffff8000;
 pub(crate) const IOVA_UNK_PAGE: u64 = IOVA_USER_TOP - 2 * UAT_PGSZ as u64;
+/// Address of the AIC timebase register page
+pub(crate) const IOVA_TIMER_PAGE: u64 = IOVA_UNK_PAGE - UAT_PGSZ as u64;
 /// User VA range excluding the unk page
-pub(crate) const IOVA_USER_USABLE_RANGE: Range<u64> = IOVA_USER_BASE..IOVA_UNK_PAGE;
+pub(crate) const IOVA_USER_USABLE_RANGE: Range<u64> = IOVA_USER_BASE..IOVA_TIMER_PAGE;
 
 // KernelMapping protection types
 
@@ -1233,7 +1235,7 @@ impl Vm {
             return Err(EINVAL);
         }
 
-        dev_info!(
+        mod_dev_dbg!(
             inner.dev,
             "MMU: IO map: {:#x}:{:#x} -> {:#x}\n",
             phys,

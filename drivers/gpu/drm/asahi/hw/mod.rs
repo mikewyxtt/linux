@@ -316,6 +316,8 @@ pub(crate) struct HwConfig {
     pub(crate) sram_base: Option<usize>,
     /// SRAM size
     pub(crate) sram_size: Option<usize>,
+    /// AIC timebase register
+    pub(crate) aic_timebase: Option<usize>,
 }
 
 /// Dynamic (fetched from hardware/DT) configuration.

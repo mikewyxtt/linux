@@ -33,6 +33,7 @@ struct Vm {
     vm: mmu::Vm,
     kernel_range: Range<u64>,
     _dummy_mapping: mmu::KernelMapping,
+    _aic_mapping: Option<mmu::KernelMapping>,
 }
 
 impl Drop for Vm {
@@ -270,6 +271,12 @@ impl File {
             result_compute_size: core::mem::size_of::<uapi::drm_asahi_result_compute>() as u32,
 
             firmware_version: [0; 4],
+
+            vm_timer_addr: gpu
+                .get_cfg()
+                .aic_timebase
+                .map(|addr| mmu::IOVA_TIMER_PAGE + addr as u64 & mmu::UAT_PGMSK as u64)
+                .unwrap_or(0),
         };
 
         for (i, mask) in gpu.get_dyncfg().id.core_masks.iter().enumerate() {
@@ -377,6 +384,19 @@ impl File {
         let dummy_mapping =
             dummy_obj.map_at(&vm, mmu::IOVA_UNK_PAGE, mmu::PROT_GPU_SHARED_RW, true)?;
 
+        let aic_mapping = gpu
+            .get_cfg()
+            .aic_timebase
+            .map(|addr| {
+                vm.map_io(
+                    mmu::IOVA_TIMER_PAGE,
+                    addr & !mmu::UAT_PGMSK,
+                    mmu::UAT_PGSZ,
+                    mmu::PROT_GPU_SHARED_RO,
+                )
+            })
+            .transpose()?;
+
         mod_dev_dbg!(device, "[File {} VM {}]: VM created\n", file_id, id);
         resv.store(Box::new(
             Vm {
@@ -385,6 +405,7 @@ impl File {
                 vm,
                 kernel_range,
                 _dummy_mapping: dummy_mapping,
+                _aic_mapping: aic_mapping,
             },
             GFP_KERNEL,
         )?)?;
