@@ -278,7 +278,7 @@ impl File {
             vm_timer_addr: gpu
                 .get_cfg()
                 .aic_timebase
-                .map(|addr| mmu::IOVA_TIMER_PAGE + addr as u64 & mmu::UAT_PGMSK as u64)
+                .map(|addr| mmu::IOVA_TIMER_PAGE + (addr & mmu::UAT_PGMSK) as u64)
                 .unwrap_or(0),
         };
 
