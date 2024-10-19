@@ -1032,7 +1032,7 @@ int dax_writeback_mapping_range(struct address_space *mapping,
 	int ret = 0;
 	unsigned int scanned = 0;
 
-	if (WARN_ON_ONCE(inode->i_blkbits != PAGE_SHIFT))
+	if (WARN_ON_ONCE(inode->i_blkbits < PAGE_SHIFT))
 		return -EIO;
 
 	if (mapping_empty(mapping) || wbc->sync_mode != WB_SYNC_ALL)
