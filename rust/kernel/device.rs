@@ -236,7 +236,7 @@ impl Device {
     pub fn from_dev(dev: &dyn RawDevice) -> ARef<Self> {
         // SAFETY: The requirements are satisfied by the existence of `RawDevice` and its safety
         // requirements.
-        unsafe { Self::from_raw(dev.raw_device()) }
+        unsafe { Self::get_device(dev.raw_device()) }
     }
 }
 
