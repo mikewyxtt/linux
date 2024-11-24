@@ -13,6 +13,7 @@
 #include "build_bug.c"
 #include "device.c"
 #include "dma-fence.c"
+#include "dma-mapping.c"
 #include "dma-resv.c"
 #include "drm.c"
 #include "drm_gpuvm.c"
