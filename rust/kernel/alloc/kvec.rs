@@ -4,9 +4,9 @@
 
 use super::{
     allocator::{KVmalloc, Kmalloc, Vmalloc},
+    drain::Drain,
     layout::ArrayLayout,
     AllocError, Allocator, Box, Flags,
-    drain::Drain,
 };
 use core::{
     fmt,
