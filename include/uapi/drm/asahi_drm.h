@@ -79,6 +79,7 @@ struct drm_asahi_params_global {
 
 enum drm_asahi_feat_compat {
 	DRM_ASAHI_FEAT_SOFT_FAULTS = (1UL) << 0,
+	DRM_ASAHI_FEAT_GETTIME = (1UL) << 1, /* Remove for upstream */
 };
 
 enum drm_asahi_feat_incompat {
