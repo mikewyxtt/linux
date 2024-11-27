@@ -77,6 +77,7 @@ struct drm_asahi_params_global {
 
 enum drm_asahi_feat_compat {
 	DRM_ASAHI_FEAT_SOFT_FAULTS = (1UL) << 0,
+	DRM_ASAHI_FEAT_GETTIME = (1UL) << 1, /* Remove for upstream */
 };
 
 enum drm_asahi_feat_incompat {
@@ -146,6 +147,11 @@ struct drm_asahi_gem_create {
 
 	/** @handle: Returned GEM handle for the BO */
 	__u32 handle;
+
+	// TODO: remove guards on next rev bump
+#if DRM_ASAHI_UNSTABLE_UABI_VERSION > 10011
+	__u32 pad;
+#endif
 };
 
 struct drm_asahi_gem_mmap_offset {
@@ -228,6 +234,11 @@ struct drm_asahi_queue_create {
 
 	/** @queue_id: The returned queue ID */
 	__u32 queue_id;
+
+	// TODO: remove guards on next rev bump
+#if DRM_ASAHI_UNSTABLE_UABI_VERSION > 10011
+	__u32 pad;
+#endif
 };
 
 struct drm_asahi_queue_destroy {
@@ -236,6 +247,11 @@ struct drm_asahi_queue_destroy {
 
 	/** @queue_id: The queue ID to be destroyed */
 	__u32 queue_id;
+
+	// TODO: remove guards on next rev bump
+#if DRM_ASAHI_UNSTABLE_UABI_VERSION > 10011
+	__u32 pad;
+#endif
 };
 
 enum drm_asahi_sync_type {
@@ -260,7 +276,7 @@ struct drm_asahi_sync {
 enum drm_asahi_subqueue {
 	DRM_ASAHI_SUBQUEUE_RENDER = 0, /* Also blit */
 	DRM_ASAHI_SUBQUEUE_COMPUTE = 1,
-	DRM_ASAHI_SUBQUEUE_COUNT = 2,
+	DRM_ASAHI_SUBQUEUE_COUNT = 2, /* Must remain multiple of 2 for struct alignment */
 };
 
 #define DRM_ASAHI_BARRIER_NONE ~(0U)
@@ -617,6 +633,9 @@ struct drm_asahi_result_render {
 
 	/** @num_tvb_overflows: Number of TVB overflows that occurred for this render */
 	__u32 num_tvb_overflows;
+
+	/** @pad: MBZ */
+	__u32 pad;
 };
 
 struct drm_asahi_result_compute {
@@ -639,12 +658,6 @@ struct drm_asahi_get_time {
 
 	/** @flags: MBZ. */
 	__u64 flags;
-
-	/** @tv_sec: On return, seconds part of a point in time */
-	__s64 tv_sec;
-
-	/** @tv_nsec: On return, nanoseconds part of a point in time */
-	__s64 tv_nsec;
 
 	/** @gpu_timestamp: On return, the GPU timestamp at that point in time */
 	__u64 gpu_timestamp;
