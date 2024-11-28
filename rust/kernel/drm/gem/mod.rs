@@ -3,9 +3,11 @@
 //! DRM GEM API
 //!
 //! C header: [`include/linux/drm/drm_gem.h`](srctree/include/linux/drm/drm_gem.h)
+#[cfg(CONFIG_DRM_GEM_SHMEM_HELPER = "y")]
+pub mod shmem;
+
 
 use crate::{
-    alloc::flags::*,
     bindings,
     drm::{device, drv, file},
     error::{to_result, Result},
@@ -42,6 +44,10 @@ pub trait IntoGEMObject: Sized + crate::private::Sealed {
     /// Returns a reference to the raw `drm_gem_object` structure, which must be valid as long as
     /// this owning object is valid.
     fn gem_obj(&self) -> &bindings::drm_gem_object;
+
+    /// Returns a reference to the raw `drm_gem_object` structure, which must be valid as long as
+    /// this owning object is valid.
+    fn mut_gem_obj(&mut self) -> &mut bindings::drm_gem_object;
 
     /// Converts a pointer to a `drm_gem_object` into a pointer to this type.
     fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Self;
@@ -117,6 +123,10 @@ impl<T: DriverObject> IntoGEMObject for Object<T> {
         &self.obj
     }
 
+    fn mut_gem_obj(&mut self) -> &mut bindings::drm_gem_object {
+        &mut self.obj
+    }
+
     fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Object<T> {
         // SAFETY: All of our objects are Object<T>.
         unsafe { crate::container_of!(obj, Object<T>, obj) as *mut Object<T> }
@@ -128,6 +138,11 @@ pub trait BaseObject: IntoGEMObject {
     /// Returns the size of the object in bytes.
     fn size(&self) -> usize {
         self.gem_obj().size
+    }
+
+    /// Sets the exportable flag, which controls whether the object can be exported via PRIME.
+    fn set_exportable(&mut self, exportable: bool) {
+        self.mut_gem_obj().exportable = exportable;
     }
 
     /// Creates a new reference to the object.
@@ -197,8 +212,6 @@ impl<T: IntoGEMObject> BaseObject for T {}
 #[pin_data]
 pub struct Object<T: DriverObject> {
     obj: bindings::drm_gem_object,
-    // The DRM core ensures the Device exists as long as its objects exist, so we don't need to
-    // manage the reference count here.
     dev: *const bindings::drm_device,
     #[pin]
     inner: T,
