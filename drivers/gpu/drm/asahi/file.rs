@@ -937,7 +937,7 @@ impl File {
             return Err(EINVAL);
         }
 
-        let mut gputime: u64 = 0;
+        let gputime: u64;
 
         // SAFETY: Assembly only loads the timer
         unsafe {
