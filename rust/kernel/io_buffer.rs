@@ -6,7 +6,7 @@
 
 use crate::{
     error::Result,
-    prelude::{GFP_KERNEL, KVec},
+    prelude::{KVec, GFP_KERNEL},
 };
 use core::mem::{size_of, MaybeUninit};
 

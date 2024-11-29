@@ -339,11 +339,7 @@ iopt_cfg!(
     apple_dart_cfg,
     io_pgtable_cfg__bindgen_ty_1__bindgen_ty_5
 );
-iopt_cfg!(
-    AmdCfg,
-    amd,
-    io_pgtable_cfg__bindgen_ty_1__bindgen_ty_6
-);
+iopt_cfg!(AmdCfg, amd, io_pgtable_cfg__bindgen_ty_1__bindgen_ty_6);
 iopt_cfg!(
     AppleUATCfg,
     apple_uat_cfg,

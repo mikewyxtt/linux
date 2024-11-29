@@ -6,7 +6,6 @@
 #[cfg(CONFIG_DRM_GEM_SHMEM_HELPER = "y")]
 pub mod shmem;
 
-
 use crate::{
     bindings,
     drm::{device, drv, file},

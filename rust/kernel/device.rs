@@ -5,8 +5,7 @@
 //! C header: [`include/linux/device.h`](srctree/include/linux/device.h)
 
 use crate::{
-    bindings,
-    of,
+    bindings, of,
     types::{ARef, Opaque},
 };
 use core::{fmt, ptr};

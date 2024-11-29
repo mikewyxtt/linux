@@ -88,6 +88,16 @@ impl<T: MailCallback> Mailbox<T> {
     }
 }
 
-unsafe impl<T> Sync for Mailbox<T> where T: MailCallback, T::Data: Sync {}
+unsafe impl<T> Sync for Mailbox<T>
+where
+    T: MailCallback,
+    T::Data: Sync,
+{
+}
 
-unsafe impl<T> Send for Mailbox<T> where T: MailCallback, T::Data: Send {}
+unsafe impl<T> Send for Mailbox<T>
+where
+    T: MailCallback,
+    T::Data: Send,
+{
+}

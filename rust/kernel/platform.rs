@@ -202,7 +202,7 @@ impl Device {
     unsafe fn from_dev(dev: ARef<device::Device>) -> Self {
         Self {
             dev,
-            used_resource: 0
+            used_resource: 0,
         }
     }
 
@@ -276,7 +276,6 @@ impl Device {
         }
         iomem
     }
-
 }
 
 impl AsRef<device::Device> for Device {

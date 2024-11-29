@@ -10,7 +10,7 @@ use core::fmt;
 use core::marker::{PhantomData, Unsize};
 use core::mem::ManuallyDrop;
 use core::mem::MaybeUninit;
-use core::ops::{CoerceUnsized,Deref, DerefMut};
+use core::ops::{CoerceUnsized, Deref, DerefMut};
 use core::pin::Pin;
 use core::ptr::NonNull;
 use core::result::Result;
@@ -461,7 +461,7 @@ impl<T: ?Sized + Unsize<U>, U: ?Sized, A: Allocator> CoerceUnsized<Box<U, A>> fo
 impl<T, A> AsRef<T> for Box<T, A>
 where
     T: ?Sized,
-    A: Allocator
+    A: Allocator,
 {
     fn as_ref(&self) -> &T {
         &*self

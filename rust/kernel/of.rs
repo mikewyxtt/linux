@@ -224,7 +224,12 @@ impl Node {
     ///
     /// Used only for phandle properties with no arguments.
     #[allow(unused_variables)]
-    pub fn parse_phandle_by_name(&self, prop: &CStr, propnames: &CStr, name: &CStr) -> Option<Node> {
+    pub fn parse_phandle_by_name(
+        &self,
+        prop: &CStr,
+        propnames: &CStr,
+        name: &CStr,
+    ) -> Option<Node> {
         #[cfg(not(CONFIG_OF))]
         {
             None
@@ -233,10 +238,14 @@ impl Node {
         // SAFETY: `raw_node` is valid per the type invariant. `of_parse_phandle` returns an
         // owned reference.
         unsafe {
-            let index = bindings::of_property_match_string(self.raw_node,
-                                                           propnames.as_char_ptr(),
-                                                           name.as_char_ptr());
-            if index < 0 { return None };
+            let index = bindings::of_property_match_string(
+                self.raw_node,
+                propnames.as_char_ptr(),
+                name.as_char_ptr(),
+            );
+            if index < 0 {
+                return None;
+            };
 
             Node::from_raw(bindings::of_parse_phandle(
                 self.raw_node,

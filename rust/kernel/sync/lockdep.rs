@@ -10,7 +10,7 @@ use crate::{
     c_str, fmt,
     init::InPlaceInit,
     new_mutex,
-    prelude::{KBox, Result, KVec},
+    prelude::{KBox, KVec, Result},
     str::{CStr, CString},
     sync::Mutex,
     types::Opaque,

@@ -11,10 +11,7 @@ use core::mem::{self, ManuallyDrop, SizedTypeProperties};
 use core::ptr::{self, NonNull};
 use core::slice::{self};
 
-use super::{
-    Allocator,
-    kvec::Vec,
-};
+use super::{kvec::Vec, Allocator};
 
 /// A draining iterator for `Vec<T>`.
 ///
@@ -156,7 +153,9 @@ impl<T, A: Allocator> Iterator for Drain<'_, T, A> {
 
     #[inline]
     fn next(&mut self) -> Option<T> {
-        self.iter.next().map(|elt| unsafe { ptr::read(elt as *const _) })
+        self.iter
+            .next()
+            .map(|elt| unsafe { ptr::read(elt as *const _) })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -168,7 +167,9 @@ impl<T, A: Allocator> Iterator for Drain<'_, T, A> {
 impl<T, A: Allocator> DoubleEndedIterator for Drain<'_, T, A> {
     #[inline]
     fn next_back(&mut self) -> Option<T> {
-        self.iter.next_back().map(|elt| unsafe { ptr::read(elt as *const _) })
+        self.iter
+            .next_back()
+            .map(|elt| unsafe { ptr::read(elt as *const _) })
     }
 }
 

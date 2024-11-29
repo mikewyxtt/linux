@@ -12,8 +12,8 @@ use crate::{
     types::Opaque,
 };
 
-use crate::prelude::KBox;
 use crate::init::InPlaceInit;
+use crate::prelude::KBox;
 
 use core::{
     marker::{PhantomData, PhantomPinned},
@@ -231,7 +231,7 @@ impl<A: AllocInner<T>, T> Allocator<A, T> {
                 mm: self.mm.clone(),
                 _pin: PhantomPinned,
             },
-            GFP_KERNEL
+            GFP_KERNEL,
         )?;
 
         let guard = self.mm.lock();
@@ -273,7 +273,7 @@ impl<A: AllocInner<T>, T> Allocator<A, T> {
                 mm: self.mm.clone(),
                 _pin: PhantomPinned,
             },
-            GFP_KERNEL
+            GFP_KERNEL,
         )?;
 
         mm_node.node.start = start;

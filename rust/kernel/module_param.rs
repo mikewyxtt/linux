@@ -7,7 +7,7 @@
 //! C header: [`include/linux/moduleparam.h`](../../../include/linux/moduleparam.h)
 
 use crate::error::{code::*, from_result};
-use crate::prelude::{GFP_KERNEL, KVec};
+use crate::prelude::{KVec, GFP_KERNEL};
 use crate::str::{CStr, Formatter};
 use core::fmt::Write;
 
