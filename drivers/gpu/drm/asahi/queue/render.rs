@@ -16,7 +16,6 @@ use crate::util::*;
 use crate::workqueue::WorkError;
 use crate::{buffer, file, fw, gpu, microseq, workqueue};
 use crate::{inner_ptr, inner_weak_ptr};
-use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
 use kernel::dma_fence::RawDmaFence;
 use kernel::drm::sched::Job;
@@ -243,22 +242,20 @@ impl super::QueueInner::ver {
             return Err(EINVAL);
         }
 
+        let cmdbuf_read_size =
+            (cmd.cmd_buffer_size as usize).min(core::mem::size_of::<uapi::drm_asahi_cmd_render>());
         let mut cmdbuf_reader = unsafe {
             UserSlicePtr::new(
                 cmd.cmd_buffer as usize as *mut _,
-                core::mem::size_of::<uapi::drm_asahi_cmd_render>(),
+                cmd.cmd_buffer_size as usize,
             )
             .reader()
         };
 
-        let mut cmdbuf: MaybeUninit<uapi::drm_asahi_cmd_render> = MaybeUninit::uninit();
+        let mut cmdbuf: uapi::drm_asahi_cmd_render = Default::default();
         unsafe {
-            cmdbuf_reader.read_raw(
-                cmdbuf.as_mut_ptr() as *mut u8,
-                core::mem::size_of::<uapi::drm_asahi_cmd_render>(),
-            )?;
+            cmdbuf_reader.read_raw(&mut cmdbuf as *mut _ as *mut u8, cmdbuf_read_size)?;
         }
-        let cmdbuf = unsafe { cmdbuf.assume_init() };
 
         if cmdbuf.flags
             & !(uapi::ASAHI_RENDER_NO_CLEAR_PIPELINE_TEXTURES
