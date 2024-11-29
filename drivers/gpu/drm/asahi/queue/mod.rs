@@ -413,7 +413,8 @@ impl Queue::ver {
             GFP_KERNEL,
         )?;
 
-        let sched = sched::Scheduler::new(dev.as_ref(), 3, WQ_SIZE, 0, 100000, c_str!("asahi_sched"))?;
+        let sched =
+            sched::Scheduler::new(dev.as_ref(), 3, WQ_SIZE, 0, 100000, c_str!("asahi_sched"))?;
         // Priorities are handled by the AGX scheduler, there is no meaning within a
         // per-queue scheduler.
         let entity = sched::Entity::new(&sched, sched::Priority::Normal)?;

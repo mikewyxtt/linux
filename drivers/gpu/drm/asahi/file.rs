@@ -187,7 +187,8 @@ impl drm::file::DriverFile for File {
         let id = gpu.ids().file.next();
 
         mod_dev_dbg!(device, "[File {}]: DRM device opened\n", id);
-        Ok(KBox::pin(Self {
+        Ok(KBox::pin(
+            Self {
                 id,
                 vms: xarray::XArray::new(xarray::flags::ALLOC1),
                 queues: xarray::XArray::new(xarray::flags::ALLOC1),
@@ -931,7 +932,6 @@ impl File {
         data: &mut uapi::drm_asahi_get_time,
         file: &DrmFile,
     ) -> Result<u32> {
-
         if data.extensions != 0 || data.flags != 0 {
             cls_pr_debug!(Errors, "get_time: Unexpected extensions or flags\n");
             return Err(EINVAL);

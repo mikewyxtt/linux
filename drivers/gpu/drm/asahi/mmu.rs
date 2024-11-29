@@ -714,7 +714,11 @@ impl KernelMapping {
         let pages = self.size() >> UAT_PGBIT;
         flush.begin_flush(self.iova(), self.size() as u64);
         if pages >= 0x10000 {
-            dev_err!(owner.dev.as_ref(), "MMU: Flush too big ({:#x} pages))\n", pages);
+            dev_err!(
+                owner.dev.as_ref(),
+                "MMU: Flush too big ({:#x} pages))\n",
+                pages
+            );
         }
 
         let cmd = fw::channels::FwCtlMsg {
@@ -1364,7 +1368,6 @@ impl Uat {
         size: usize,
         cached: bool,
     ) -> Result<UatRegion> {
-
         let mut res = core::mem::MaybeUninit::<bindings::resource>::uninit();
 
         let res = unsafe {
@@ -1557,7 +1560,8 @@ impl Uat {
 
         let inner = Self::make_inner(dev)?;
 
-        let pagetables_rgn = Self::map_region(dev.as_ref(), c_str!("pagetables"), PAGETABLES_SIZE, true)?;
+        let pagetables_rgn =
+            Self::map_region(dev.as_ref(), c_str!("pagetables"), PAGETABLES_SIZE, true)?;
 
         dev_info!(dev.as_ref(), "MMU: Creating kernel page tables\n");
         let kernel_lower_vm = Vm::new(dev, inner.clone(), IOVA_USER_RANGE, cfg, false, 1)?;

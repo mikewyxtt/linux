@@ -3,15 +3,13 @@
 //! Top-level GPU driver implementation.
 
 use kernel::{
-    c_str, drm, drm::drv, drm::ioctl, error::Result, of, platform, prelude::*,
-    sync::Arc,
+    c_str, drm, drm::drv, drm::ioctl, error::Result, of, platform, prelude::*, sync::Arc,
 };
 
 use crate::{debug, file, gem, gpu, hw, regs};
 
 use kernel::macros::vtable;
 use kernel::types::ARef;
-
 
 /// Convenience type alias for the `device::Data` type for this driver.
 // type DeviceData = device::Data<drv::Registration<AsahiDriver>, regs::Resources, AsahiData>;
@@ -94,14 +92,38 @@ kernel::of_device_table!(
     MODULE_OF_TABLE,
     <AsahiDriver as platform::Driver>::IdInfo,
     [
-        (of::DeviceId::new(c_str!("apple,agx-t8103")), &hw::t8103::HWCONFIG),
-        (of::DeviceId::new(c_str!("apple,agx-t8112")), &hw::t8112::HWCONFIG),
-        (of::DeviceId::new(c_str!("apple,agx-t6000")), &hw::t600x::HWCONFIG_T6000),
-        (of::DeviceId::new(c_str!("apple,agx-t6001")), &hw::t600x::HWCONFIG_T6001),
-        (of::DeviceId::new(c_str!("apple,agx-t6002")), &hw::t600x::HWCONFIG_T6002),
-        (of::DeviceId::new(c_str!("apple,agx-t6020")), &hw::t602x::HWCONFIG_T6020),
-        (of::DeviceId::new(c_str!("apple,agx-t6021")), &hw::t602x::HWCONFIG_T6021),
-        (of::DeviceId::new(c_str!("apple,agx-t6022")), &hw::t602x::HWCONFIG_T6022),
+        (
+            of::DeviceId::new(c_str!("apple,agx-t8103")),
+            &hw::t8103::HWCONFIG
+        ),
+        (
+            of::DeviceId::new(c_str!("apple,agx-t8112")),
+            &hw::t8112::HWCONFIG
+        ),
+        (
+            of::DeviceId::new(c_str!("apple,agx-t6000")),
+            &hw::t600x::HWCONFIG_T6000
+        ),
+        (
+            of::DeviceId::new(c_str!("apple,agx-t6001")),
+            &hw::t600x::HWCONFIG_T6001
+        ),
+        (
+            of::DeviceId::new(c_str!("apple,agx-t6002")),
+            &hw::t600x::HWCONFIG_T6002
+        ),
+        (
+            of::DeviceId::new(c_str!("apple,agx-t6020")),
+            &hw::t602x::HWCONFIG_T6020
+        ),
+        (
+            of::DeviceId::new(c_str!("apple,agx-t6021")),
+            &hw::t602x::HWCONFIG_T6021
+        ),
+        (
+            of::DeviceId::new(c_str!("apple,agx-t6022")),
+            &hw::t602x::HWCONFIG_T6022
+        ),
     ]
 );
 

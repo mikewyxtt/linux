@@ -348,7 +348,10 @@ impl EventChannel::ver {
                         EventMsg::Fault => match self.gpu.as_ref() {
                             Some(gpu) => gpu.handle_fault(),
                             None => {
-                                dev_crit!(self.dev.as_ref(), "EventChannel: No GPU manager available!\n")
+                                dev_crit!(
+                                    self.dev.as_ref(),
+                                    "EventChannel: No GPU manager available!\n"
+                                )
                             }
                         },
                         EventMsg::Timeout {
@@ -358,7 +361,10 @@ impl EventChannel::ver {
                         } => match self.gpu.as_ref() {
                             Some(gpu) => gpu.handle_timeout(counter, event_slot, unk_8),
                             None => {
-                                dev_crit!(self.dev.as_ref(), "EventChannel: No GPU manager available!\n")
+                                dev_crit!(
+                                    self.dev.as_ref(),
+                                    "EventChannel: No GPU manager available!\n"
+                                )
                             }
                         },
                         EventMsg::Flag { firing, .. } => {
@@ -380,7 +386,10 @@ impl EventChannel::ver {
                                 gpu.ack_grow(buffer_slot, vm_slot, counter);
                             }
                             None => {
-                                dev_crit!(self.dev.as_ref(), "EventChannel: No GPU manager available!\n")
+                                dev_crit!(
+                                    self.dev.as_ref(),
+                                    "EventChannel: No GPU manager available!\n"
+                                )
                             }
                         },
                         EventMsg::ChannelError {
@@ -405,7 +414,10 @@ impl EventChannel::ver {
                                 );
                             }
                             None => {
-                                dev_crit!(self.dev.as_ref(), "EventChannel: No GPU manager available!\n")
+                                dev_crit!(
+                                    self.dev.as_ref(),
+                                    "EventChannel: No GPU manager available!\n"
+                                )
                             }
                         },
                         msg => {
@@ -483,7 +495,12 @@ impl FwLogChannel {
                 let index = Self::BUF_SIZE * i + msg.msg_index.0 as usize;
                 let payload = &self.payload_buf.as_slice()[index];
                 if payload.msg_type != 3 {
-                    dev_warn!(self.dev.as_ref(), "Unknown FWLog{} payload: {:?}\n", i, payload);
+                    dev_warn!(
+                        self.dev.as_ref(),
+                        "Unknown FWLog{} payload: {:?}\n",
+                        i,
+                        payload
+                    );
                     self.ch.get(i);
                     continue;
                 }

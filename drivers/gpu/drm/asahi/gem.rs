@@ -148,7 +148,6 @@ pub(crate) fn lookup_handle(file: &DrmFile, handle: u32) -> Result<ObjectRef> {
 }
 
 impl gem::BaseDriverObject<Object> for DriverObject {
-
     /// Callback to create the inner data of a GEM object
     fn new(_dev: &AsahiDevice, _size: usize) -> impl PinInit<Self, Error> {
         let id = GEM_ID.fetch_add(1, Ordering::Relaxed);

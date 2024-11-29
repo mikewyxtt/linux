@@ -750,7 +750,11 @@ impl HeapAllocator {
             backing_objects: KVec::new(),
             // TODO: This clearly needs a try_clone() or similar
             name: CString::try_from_fmt(fmt!("{}", &*name))?,
-            garbage: if keep_garbage { Some(KVec::new()) } else { None },
+            garbage: if keep_garbage {
+                Some(KVec::new())
+            } else {
+                None
+            },
             total_garbage: 0,
         };
 

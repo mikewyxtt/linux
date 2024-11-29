@@ -764,7 +764,11 @@ impl GpuManager::ver {
             gpu_id.num_gps * gpu_id.num_clusters
         );
         dev_info!(dev.as_ref(), "  Core masks: {:#x?}\n", gpu_id.core_masks);
-        dev_info!(dev.as_ref(), "  Active cores: {}\n", gpu_id.total_active_cores);
+        dev_info!(
+            dev.as_ref(),
+            "  Active cores: {}\n",
+            gpu_id.total_active_cores
+        );
 
         dev_info!(dev.as_ref(), "Getting configuration from device tree...\n");
         let pwr_cfg = hw::PwrConfig::load(dev, cfg)?;
@@ -947,7 +951,11 @@ impl GpuManager::ver {
 
         let info = res.get_fault_info(self.cfg);
         if info.is_some() {
-            dev_err!(self.dev.as_ref(), "  Fault info: {:#x?}\n", info.as_ref().unwrap());
+            dev_err!(
+                self.dev.as_ref(),
+                "  Fault info: {:#x?}\n",
+                info.as_ref().unwrap()
+            );
         }
         info
     }
@@ -973,7 +981,10 @@ impl GpuManager::ver {
             }
 
             if debug_enabled(DebugFlags::NoGpuRecovery) {
-                dev_crit!(self.dev.as_ref(), "  GPU recovery is disabled, wedging forever!\n");
+                dev_crit!(
+                    self.dev.as_ref(),
+                    "  GPU recovery is disabled, wedging forever!\n"
+                );
             } else if halted != 0 {
                 dev_err!(self.dev.as_ref(), "  Attempting recovery...\n");
                 raw.flags.halted.store(0, Ordering::SeqCst);
@@ -1153,7 +1164,10 @@ impl GpuManager for GpuManager::ver {
 
         for ctx in garbage_ctx {
             if self.invalidate_context(&ctx).is_err() {
-                dev_err!(self.dev.as_ref(), "GpuContext: Failed to invalidate GPU context!\n");
+                dev_err!(
+                    self.dev.as_ref(),
+                    "GpuContext: Failed to invalidate GPU context!\n"
+                );
                 if debug_enabled(DebugFlags::OopsOnGpuCrash) {
                     panic!("GPU firmware timed out");
                 }
@@ -1347,7 +1361,10 @@ impl GpuManager for GpuManager::ver {
         let wq = match self.event_manager.get_owner(event_slot) {
             Some(wq) => wq,
             None => {
-                dev_err!(self.dev.as_ref(), "Workqueue not found for this event slot!\n");
+                dev_err!(
+                    self.dev.as_ref(),
+                    "Workqueue not found for this event slot!\n"
+                );
                 return;
             }
         };
@@ -1382,12 +1399,18 @@ impl GpuManager for GpuManager::ver {
                 .send_message(EP_DOORBELL, MSG_TX_DOORBELL | DOORBELL_DEVCTRL)
                 .is_err()
             {
-                dev_err!(self.dev.as_ref(), "Failed to send Recover Channel command\n");
+                dev_err!(
+                    self.dev.as_ref(),
+                    "Failed to send Recover Channel command\n"
+                );
             }
         }
 
         if txch.device_control.wait_for(token).is_err() {
-            dev_err!(self.dev.as_ref(), "Timed out waiting for Recover Channel command\n");
+            dev_err!(
+                self.dev.as_ref(),
+                "Timed out waiting for Recover Channel command\n"
+            );
         }
 
         if debug_enabled(DebugFlags::VerboseFaults) {

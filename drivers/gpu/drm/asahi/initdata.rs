@@ -17,8 +17,8 @@ use crate::fw::types::*;
 use crate::{driver::AsahiDevice, gem, gpu, hw, mmu};
 use kernel::error::{Error, Result};
 use kernel::macros::versions;
-use kernel::{init, init::Init, try_init};
 use kernel::prelude::*;
+use kernel::{init, init::Init, try_init};
 
 /// Builder helper for the global GPU InitData.
 #[versions(AGX)]

@@ -8,13 +8,7 @@
 //! information, and starting the GPU firmware coprocessor.
 
 use crate::hw;
-use kernel::{
-    device,
-    io_mem::IoMem,
-    platform,
-    prelude::*,
-    types::ARef,
-};
+use kernel::{device, io_mem::IoMem, platform, prelude::*, types::ARef};
 
 /// Size of the ASC control MMIO region.
 pub(crate) const ASC_CTL_SIZE: usize = 0x4000;
